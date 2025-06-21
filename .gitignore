@@ -1,11 +1,7 @@
-# .gitignore
 .env
 envs/
 __pycache__/
 *.pyc
 *.log
-node_modules/
-dist/
-*.env
 .vscode/
 .DS_Store
