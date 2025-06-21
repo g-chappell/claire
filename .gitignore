@@ -5,3 +5,8 @@ __pycache__/
 *.log
 .vscode/
 .DS_Store
+src/frontend/node_modules/
+src/frontend/dist/
+*.venv/
+EOF
+
