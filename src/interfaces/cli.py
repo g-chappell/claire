@@ -9,5 +9,6 @@ def simulate():
     response = roleplay.step()
     print("Assistant:", response.msg.content)
 
-
-
+# This wrapper makes run.py happy
+def run():
+    app()

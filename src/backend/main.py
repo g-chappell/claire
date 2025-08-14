@@ -26,6 +26,11 @@ class ChatResponse(BaseModel):
 async def chat(req: ChatRequest):
     try:
         reply = run_agent(req.message)
-        return ChatResponse(reply=reply)
+        return ChatResponse(reply=reply if isinstance(reply, str) else str(reply))
     except Exception as e:
+        import traceback
+        print("ERROR in /chat:", e)
+        print(traceback.format_exc())
+        # Return the original message to the client for debugging (dev only)
         raise HTTPException(status_code=500, detail=str(e))
+
