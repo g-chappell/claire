@@ -5,27 +5,33 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from "react";
+import { marked } from "marked";
+import { useOutletContext } from "react-router-dom"
 
-type Msg = { role: "user" | "assistant"; content: string };
+type Msg = { role: "user" | "assistant"; content: string; timestamp: number };
 
 export default function ChatPage() {
-  const [messages, setMessages] = useState<Msg[]>([]);
+  const { messages, setMessages } = useOutletContext<{ messages: Msg[]; setMessages: Function }>();
   const [draft, setDraft] = useState("");
+  const [loading, setLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  // // auto-scroll on new message
-  // useEffect(() => {
-  //   bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  // }, [messages]);
+  // auto-scroll on new message
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   async function send(e: FormEvent | KeyboardEvent) {
     e.preventDefault();
     const text = draft.trim();
-    if (!text) return;
+    if (!text || loading) return;
 
-    // optimistic user bubble
-    setMessages((m) => [...m, { role: "user", content: text }]);
+    setMessages((m: Msg[]) => [
+      ...m,
+      { role: "user", content: text, timestamp: Date.now() },
+    ]);
     setDraft("");
+    setLoading(true);
 
     try {
       const res = await fetch("http://127.0.0.1:8000/chat", // dont remove the hardcoded url
@@ -36,12 +42,21 @@ export default function ChatPage() {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const { reply } = await res.json();
-      setMessages((m) => [...m, { role: "assistant", content: reply }]);
-    } catch (err: any) {
-      setMessages((m) => [
+      setMessages((m: Msg[]) => [
         ...m,
-        { role: "assistant", content: `⚠️ ${err.message || err}` },
+        { role: "assistant", content: reply, timestamp: Date.now() },
       ]);
+    } catch (err: any) {
+      setMessages((m: Msg[]) => [
+        ...m,
+        {
+          role: "assistant",
+          content: `⚠️ ${err.message || err}`,
+          timestamp: Date.now(),
+        },
+      ]);
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -50,19 +65,25 @@ export default function ChatPage() {
     if (e.key === "Enter" && !e.shiftKey) send(e);
   };
 
+
+  // Format timestamp
+  const formatTime = (ts: number) =>
+    new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
   return (
-    <main className="flex min-h-screen items-start justify-center p-6">
+    <main className="flex h-full w-full items-start justify-center">
       <div className="
         mx-auto
-        w-[1024px]    /* exactly 768px wide */
-        h-[85vh
-        flex flex-col overflow-hidden
+        w-[1024px]
+        h-full
+        flex flex-col
+        overflow-hidden
         rounded-2xl shadow-xl
         bg-slate-800 border border-slate-700
       ">
-        {/* ── Chat History */}
-        <section className="flex-1 overflow-y-auto space-y-6 p-6">
-          {messages.map((m, i) => (
+        {/* ── Chat History*/}
+        <section className="flex-1 min-h-0 overflow-y-auto space-y-6 p-6">
+          {messages.map((m: Msg, i: number) => (
             <div
               key={i}
               className={`flex items-start gap-2 ${
@@ -85,7 +106,7 @@ export default function ChatPage() {
               <div
                 className={`
                   max-w-[75%] whitespace-pre-wrap rounded-2xl px-4 py-3
-                  text-sm leading-relaxed
+                  text-sm leading-relaxed relative
                   ${
                     m.role === "user"
                       ? "bg-indigo-600 text-white"
@@ -93,7 +114,14 @@ export default function ChatPage() {
                   }
                 `}
               >
-                {m.content}
+                <span
+                  dangerouslySetInnerHTML={{
+                    __html: marked.parse(m.content),
+                  }}
+                />
+                <span className="absolute bottom-1 right-3 text-xs text-slate-400">
+                  {formatTime(m.timestamp)}
+                </span>
               </div>
 
               {/* user avatar */}
@@ -110,6 +138,13 @@ export default function ChatPage() {
             </div>
           ))}
 
+          {/* Loading indicator */}
+          {loading && (
+            <div className="flex items-center gap-2 text-slate-400 text-sm pl-16">
+              <span className="animate-pulse">Agent is typing…</span>
+            </div>
+          )}
+
           <div ref={bottomRef} />
         </section>
 
@@ -125,6 +160,7 @@ export default function ChatPage() {
               bg-slate-700 p-4 text-slate-100 placeholder:text-slate-400
               focus:outline-none focus:ring-2 focus:ring-indigo-500
             "
+            disabled={loading}
           />
         </form>
       </div>
