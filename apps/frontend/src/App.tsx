@@ -1,5 +1,6 @@
 import { Outlet, useLocation } from "react-router-dom";
 import { useState } from "react";
+import "highlight.js/styles/atom-one-dark.css";
 
 export default function App() {
   const location = useLocation();

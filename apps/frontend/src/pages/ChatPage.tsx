@@ -6,7 +6,21 @@ import {
   type KeyboardEvent,
 } from "react";
 import { marked } from "marked";
+import hljs from "highlight.js";
 import { useOutletContext } from "react-router-dom"
+
+// Configure marked to use highlight.js for code blocks
+marked.setOptions({
+  // @ts-ignore
+  highlight: function(code: string, lang: string) {
+    if (lang && hljs.getLanguage(lang)) {
+      return hljs.highlight(code, { language: lang }).value;
+    }
+    return hljs.highlightAuto(code).value;
+  },
+  gfm: true,
+  breaks: true,
+} as any); // <-- add 'as any' to silence the type error
 
 type Msg = { role: "user" | "assistant"; content: string; timestamp: number };
 
@@ -16,10 +30,37 @@ export default function ChatPage() {
   const [loading, setLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  // auto-scroll on new message
+  // // auto-scroll on new message
+  // useEffect(() => {
+  //   bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  // }, [messages]);
+
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  // Add language labels to code blocks
+  document.querySelectorAll('.prose pre code').forEach((block) => {
+    const pre = block.parentElement;
+    if (!pre) return;
+    // Remove existing label if present
+    const oldLabel = pre.querySelector('.code-lang-label');
+    if (oldLabel) oldLabel.remove();
+    // Get language from class
+    const lang = Array.from(block.classList)
+      .find(cls => cls.startsWith('language-'))
+      ?.replace('language-', '');
+    if (lang) {
+      const label = document.createElement('div');
+      label.className = 'code-lang-label';
+      label.textContent = lang;
+      pre.appendChild(label);
+    }
+  });
+
+  // Ensure highlight.js runs after new messages render
+  hljs.highlightAll();
+
+  // auto-scroll on new message
+  bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+}, [messages]);
 
   async function send(e: FormEvent | KeyboardEvent) {
     e.preventDefault();
@@ -105,16 +146,16 @@ export default function ChatPage() {
               {/* bubble */}
               <div
                 className={`
-                  max-w-[75%] whitespace-pre-wrap rounded-2xl px-4 py-3
-                  text-sm leading-relaxed relative
-                  ${
-                    m.role === "user"
-                      ? "bg-indigo-600 text-white"
-                      : "bg-slate-700 text-slate-100"
+                  max-w-[75%] rounded-2xl px-4 py-3
+                  relative
+                  ${m.role === "user"
+                    ? "bg-indigo-600"
+                    : "bg-slate-700"
                   }
                 `}
               >
-                <span
+                <div
+                  className="prose prose-invert max-w-none"
                   dangerouslySetInnerHTML={{
                     __html: marked.parse(m.content),
                   }}

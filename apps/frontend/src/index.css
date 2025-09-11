@@ -1,1 +1,37 @@
 @import "tailwindcss";
+
+/* Custom code block styling */
+.prose pre {
+  background: #18181b !important; /* dark shade */
+  border-radius: 0.75rem;
+  padding: 1rem;
+  margin: 0.5rem 0;
+  position: relative;
+  overflow-x: auto;
+}
+
+.prose code {
+  background: transparent !important;
+  font-size: 0.95em;
+}
+
+.prose pre code {
+  background: none;
+  padding: 0;
+  font-size: 1em;
+}
+
+/* Language label styling */
+.code-lang-label {
+  position: absolute;
+  top: 0.5rem;
+  right: 1rem;
+  background: #27272a;
+  color: #72e6fa;
+  font-size: 0.75em;
+  padding: 0.2em 0.6em;
+  border-radius: 0.5em;
+  font-family: monospace;
+  pointer-events: none;
+  z-index: 2;
+}

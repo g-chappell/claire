@@ -38,6 +38,11 @@ base_prompt = ChatPromptTemplate.from_messages([
 
 chain = base_prompt | llm
 
+def log_llm_response(response: str, log_path: str = "/home/gchappell/projects/claire/apps/backend/app/agents/llm_responses.log"):
+    with open(log_path, "a", encoding="utf-8") as f:
+        f.write(response)
+        f.write("\n" + "="*80 + "\n")
+
 
 def _flatten_text_from_parts(parts: List[Any]) -> str:
     """
@@ -70,11 +75,14 @@ def _collect_citation_urls(parts: List[Any]) -> List[str]:
 
 def run_agent(user_msg: str) -> str:
     if not API_KEY:
-        return f"[DEV placeholder] Echo: {user_msg}"
+        response = f"[DEV placeholder] Echo: {user_msg}"
+        log_llm_response(response)
+        return response
 
     resp = chain.invoke({"user_msg": user_msg})
 
     if isinstance(resp.content, str):
+        log_llm_response(resp.content)
         return resp.content
 
     parts = list(resp.content) if isinstance(resp.content, list) else []
@@ -86,4 +94,5 @@ def run_agent(user_msg: str) -> str:
         if sources:
             answer += "\n\nSources:\n" + "\n".join(f"- {u}" for u in sources[:8])
 
+    log_llm_response(answer)
     return answer
