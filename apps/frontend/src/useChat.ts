@@ -6,8 +6,12 @@ export interface Msg {
   text: string;
 }
 
-const API_BASE =
-  (import.meta as any).env?.VITE_API_URL?.replace(/\/$/, "") || ""; // e.g., http://localhost:8000
+const defaultBase =
+  window.location.hostname.endsWith("blacksail.dev")
+    ? "https://api.blacksail.dev"
+    : "http://localhost:8000";
+
+const API_BASE = (import.meta.env.VITE_API_URL ?? defaultBase).replace(/\/$/, "");
 
 export function useChat() {
   const [messages, setMessages] = useState<Msg[]>([]);
