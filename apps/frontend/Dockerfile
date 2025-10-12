@@ -14,6 +14,7 @@ COPY apps/frontend ./
 
 # Create production env file
 ARG VITE_API_URL
+ENV VITE_API_URL=${VITE_API_URL}
 RUN printf "VITE_API_URL=%s\n" "$VITE_API_URL" > .env.production
 
 # Build Vite -> outputs static files in /app/dist
