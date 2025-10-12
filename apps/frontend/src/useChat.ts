@@ -6,18 +6,21 @@ export interface Msg {
   text: string;
 }
 
+const API_BASE =
+  (import.meta as any).env?.VITE_API_URL?.replace(/\/$/, "") || ""; // e.g., http://localhost:8000
+
 export function useChat() {
   const [messages, setMessages] = useState<Msg[]>([]);
-  const [loading, setLoading]   = useState(false);
+  const [loading, setLoading] = useState(false);
 
   async function send(userText: string) {
     if (!userText.trim()) return;
     const id = Date.now();
-    setMessages((m) => [...m, { id, role: "user",       text: userText }]);
+    setMessages((m) => [...m, { id, role: "user", text: userText }]);
     setLoading(true);
 
     try {
-      const res = await fetch("http://127.0.0.1:8000/chat", {
+      const res = await fetch(`${API_BASE}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: userText }),
