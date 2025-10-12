@@ -9,6 +9,13 @@ import { marked } from "marked";
 import hljs from "highlight.js";
 import { useOutletContext } from "react-router-dom"
 
+const defaultBase =
+  window.location.hostname.endsWith("blacksail.dev")
+    ? "https://api.blacksail.dev"
+    : "http://localhost:8000";
+
+const API_BASE = (import.meta.env.VITE_API_URL ?? defaultBase).replace(/\/$/, "");
+
 // Configure marked to use highlight.js for code blocks
 marked.setOptions({
   // @ts-ignore
@@ -75,8 +82,7 @@ export default function ChatPage() {
     setLoading(true);
 
     try {
-      const res = await fetch("http://127.0.0.1:8000/chat", // dont remove the hardcoded url
-        {
+      const res = await fetch(`${API_BASE}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: text }),
