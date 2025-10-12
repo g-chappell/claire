@@ -12,6 +12,10 @@ RUN npm ci
 # Copy the rest of your frontend source
 COPY apps/frontend ./
 
+# Create production env file
+ARG VITE_API_URL
+RUN printf "VITE_API_URL=%s\n" "$VITE_API_URL" > .env.production
+
 # Build Vite -> outputs static files in /app/dist
 RUN npm run build
 
