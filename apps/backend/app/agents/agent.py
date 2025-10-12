@@ -6,6 +6,9 @@ from langchain_anthropic import ChatAnthropic
 MODEL = os.getenv("ANTHROPIC_MODEL", "claude-3-7-sonnet-20250219")
 API_KEY = os.getenv("ANTHROPIC_API_KEY")
 
+# Where to write LLM logs (env can override; container-safe default)
+LOG_FILE_DEFAULT = "/data/logs/llm_responses.log"
+
 WEB_SEARCH_TOOL = [
     {
         "type": "web_search_20250305",   # ← was "web_search"
@@ -38,10 +41,15 @@ base_prompt = ChatPromptTemplate.from_messages([
 
 chain = base_prompt | llm
 
-def log_llm_response(response: str, log_path: str = "/home/gchappell/projects/claire/apps/backend/app/agents/llm_responses.log"):
-    with open(log_path, "a", encoding="utf-8") as f:
+def log_llm_response(response: str, log_path: str | None = None):
+    # Use provided path, or env var, or container-safe default
+    path = (log_path
+            or os.getenv("LOG_FILE")
+            or LOG_FILE_DEFAULT)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "a", encoding="utf-8") as f:
         f.write(response)
-        f.write("\n" + "="*80 + "\n")
+        f.write("\n" + "=" * 80 + "\n")
 
 
 def _flatten_text_from_parts(parts: List[Any]) -> str:

@@ -1,0 +1,85 @@
+version: "3.9"
+
+# A small private network for our containers to talk to each other
+networks:
+  web:
+
+# Volumes = “named folders” Docker manages for persistence
+volumes:
+  letsencrypt:   # Traefik's SSL certificates live here
+  rag_data:      # future vector store (RAG) lives here
+  logs_data:     # backend logs live here
+
+services:
+  # ---- Reverse proxy (front door) with HTTPS (Let’s Encrypt) ----
+  traefik:
+    image: traefik:v3.1
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.letsencrypt.acme.email=admin@blacksail.dev"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+    ports:
+      - "80:80"     # HTTP (Traefik will redirect this to HTTPS)
+      - "443:443"   # HTTPS
+    volumes:
+      - ./traefik/traefik.yml:/traefik.yml:ro
+      - ../letsencrypt:/letsencrypt
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [web]
+    restart: unless-stopped
+
+  # ---- Backend API (FastAPI + Uvicorn) ----
+  backend:
+    image: ghcr.io/g-chappell/claire-backend:v0.1.0   # <— use your pushed tag
+    env_file:
+      - ../../.env                                    # server-side backend env (prod)
+    environment:
+      - FRONTEND_ORIGIN=https://app.blacksail.dev
+      - RAG_STORE_PATH=/data/vector
+      - LOG_FILE=/data/logs/llm_responses.log
+    volumes:
+      - rag_data:/data/vector
+      - logs_data:/data/logs
+    expose:
+      - "8000"                                        # internal port; Traefik routes to it
+    networks: [web]
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      # HTTPS router
+      - "traefik.http.routers.backend.rule=Host(`api.blacksail.dev`)"
+      - "traefik.http.routers.backend.entrypoints=websecure"
+      - "traefik.http.routers.backend.tls.certresolver=letsencrypt"
+      - "traefik.http.services.backend.loadbalancer.server.port=8000"
+      # HTTP -> HTTPS redirect
+      - "traefik.http.routers.backend-http.rule=Host(`api.blacksail.dev`)"
+      - "traefik.http.routers.backend-http.entrypoints=web"
+      - "traefik.http.routers.backend-http.middlewares=redirect-https"
+      - "traefik.http.middlewares.redirect-https.redirectscheme.scheme=https"
+
+  # ---- Frontend (Vite build served by Nginx) ----
+  frontend:
+    image: ghcr.io/g-chappell/claire-frontend:v0.1.0  # <— use your pushed tag
+    # NOTE: Vite reads env at build time. The running Nginx container
+    # does not use .env.local. Keep this line removed to avoid confusion.
+    # env_file:
+    #   - ../../apps/frontend/.env.local
+    expose:
+      - "80"                                          # Nginx listens on 80 in the container
+    networks: [web]
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      # HTTPS router
+      - "traefik.http.routers.frontend.rule=Host(`app.blacksail.dev`)"
+      - "traefik.http.routers.frontend.entrypoints=websecure"
+      - "traefik.http.routers.frontend.tls.certresolver=letsencrypt"
+      - "traefik.http.services.frontend.loadbalancer.server.port=80"
+      # HTTP -> HTTPS redirect
+      - "traefik.http.routers.frontend-http.rule=Host(`app.blacksail.dev`)"
+      - "traefik.http.routers.frontend-http.entrypoints=web"
+      - "traefik.http.routers.frontend-http.middlewares=redirect-https"
