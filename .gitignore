@@ -1,7 +1,46 @@
+# --- Secrets / env ---
 .env
-envs/
+.env.*
+!.env.example
+apps/backend/.env
+apps/backend/.env.*
+!apps/backend/.env.example
+apps/frontend/.env.local
+apps/frontend/.env.*
+!apps/frontend/.env.local.example
+
+# --- Python ---
 __pycache__/
-*.pyc
-*.log
-.vscode/
+*.py[cod]
+*$py.class
+.venv/
+.venvs/
+.envrc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+coverage.xml
+htmlcov/
+
+# --- Node / Frontend ---
+node_modules/
+dist/
+build/
+.vite/
+.next/
+.vercel/
+*.local
+
+# --- OS/Editor ---
 .DS_Store
+.vscode/
+.idea/
+
+# --- Data & logs (monorepo) ---
+apps/backend/data/*
+!apps/backend/data/.gitkeep
+logs/
+*.log
+
+# --- Docker ---
+*.pid
