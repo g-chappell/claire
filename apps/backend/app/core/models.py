@@ -17,15 +17,6 @@ class AcceptanceCriteria(BaseModel):
     story_id: str
     gherkin: str
 
-
-class Story(BaseModel):
-    id: str
-    epic_id: Optional[str] = None
-    title: str
-    description: str
-    acceptance: list[AcceptanceCriteria] = []
-
-
 class Task(BaseModel):
     id: str
     story_id: str
@@ -46,6 +37,40 @@ class BacklogBundle(BaseModel):
     acceptance: list[AcceptanceCriteria]
     design: Optional[DesignNote] = None
 
+class ProductVision(BaseModel):
+    id: str
+    goals: list[str]
+    personas: list[str] = []
+    features: list[str]
+
+class TechnicalSolution(BaseModel):
+    id: str
+    stack: list[str] # e.g., ["node", "vite", "react", "sqlite"]
+    modules: list[str]
+    interfaces: dict[str, str]
+    decisions: list[str]
+
+
+class Epic(BaseModel):
+    id: str
+    title: str
+    description: str = ""
+    priority_rank: int = Field(ge=1, description="1 = highest priority")
+
+class Story(BaseModel): # extend exiting Story if already defined; else define
+    id: str
+    epic_id: str
+    title: str
+    description: str = ""
+    priority_rank: int = Field(ge=1, description="1 = highest priority")
+    acceptance: list["AcceptanceCriteria"] = [] # forward ref ok
+    tests: list[str] = []
+
+class PlanBundle(BaseModel):
+    product_vision: ProductVision
+    technical_solution: TechnicalSolution
+    epics: list[Epic]
+    stories: list[Story]
 
 # ====== Run / Manifest ======
 class RunCreate(BaseModel):

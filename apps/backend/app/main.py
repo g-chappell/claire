@@ -15,6 +15,7 @@ from pydantic import BaseModel
 # Settings + new Runs API
 from app.configs.settings import get_settings
 from app.api.runs import router as runs_router
+from app.api.plan import router as plan_router
 
 settings = get_settings()
 
@@ -91,3 +92,4 @@ async def chat(req: ChatRequest):
 #   POST /runs         -> create run + manifest + save requirement
 #   GET  /runs/{id}    -> fetch run + manifest + requirement
 app.include_router(runs_router)
+app.include_router(plan_router)
