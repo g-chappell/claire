@@ -10,7 +10,7 @@ class Requirement(BaseModel):
     description: str
     constraints: list[str] = []
     priority: Literal["Must", "Should", "Could"] = "Should"
-    non_functionals: list[str] = []
+    non_functionals: list[str] = Field(default_factory=list)
 
 
 class AcceptanceCriteria(BaseModel):
@@ -21,34 +21,32 @@ class Task(BaseModel):
     id: str
     story_id: str
     title: str
-    definition_of_done: list[str]
+    order: int = 1
+    status: Literal["todo", "doing", "done"] = "todo"  # optional; will be filtered if ORM lacks this column
 
 
 class DesignNote(BaseModel):
-    id: Optional[str] = None
-    scope: str
-    decisions: list[str]
-    interfaces: dict[str, str]
+    id: str
+    title: str
+    kind: Literal["overview", "api", "frontend", "repo", "quality", "risk", "other"]  # overview|api|frontend|repo|quality|risk|other
+    body_md: str
+    tags: list[str] = Field(default_factory=list)
+    related_epic_ids: list[str] = Field(default_factory=list)
+    related_story_ids: list[str] = Field(default_factory=list)
 
-
-class BacklogBundle(BaseModel):
-    stories: list[Story]
-    tasks: list[Task]
-    acceptance: list[AcceptanceCriteria]
-    design: Optional[DesignNote] = None
 
 class ProductVision(BaseModel):
     id: str
-    goals: list[str]
-    personas: list[str] = []
-    features: list[str]
+    goals: list[str] = Field(default_factory=list)
+    personas: list[str] = Field(default_factory=list)
+    features: list[str] = Field(default_factory=list)
 
 class TechnicalSolution(BaseModel):
     id: str
-    stack: list[str] # e.g., ["node", "vite", "react", "sqlite"]
-    modules: list[str]
-    interfaces: dict[str, str]
-    decisions: list[str]
+    stack: list[str] = Field(default_factory=list)# e.g., ["node", "vite", "react", "sqlite"]
+    modules: list[str] = Field(default_factory=list)
+    interfaces: dict[str, str] = Field(default_factory=dict)
+    decisions: list[str] = Field(default_factory=list)
 
 
 class Epic(BaseModel):
@@ -63,23 +61,25 @@ class Story(BaseModel): # extend exiting Story if already defined; else define
     title: str
     description: str = ""
     priority_rank: int = Field(ge=1, description="1 = highest priority")
-    acceptance: list["AcceptanceCriteria"] = [] # forward ref ok
-    tests: list[str] = []
+    acceptance: list["AcceptanceCriteria"] = Field(default_factory=list)
+    tests: list[str] = Field(default_factory=list)
+    tasks: list[Task] = Field(default_factory=list)
 
 class PlanBundle(BaseModel):
     product_vision: ProductVision
     technical_solution: TechnicalSolution
-    epics: list[Epic]
-    stories: list[Story]
+    epics: list[Epic] = Field(default_factory=list)
+    stories: list[Story] = Field(default_factory=list)
+    design_notes: list[DesignNote] = Field(default_factory=list)
 
 # ====== Run / Manifest ======
 class RunCreate(BaseModel):
     title: str = Field(..., description="Short label for the run")
     requirement_title: str
     requirement_description: str
-    constraints: list[str] = []
+    constraints: list[str] = Field(default_factory=list)
     priority: Literal["Must", "Should", "Could"] = "Should"
-    non_functionals: list[str] = []
+    non_functionals: list[str] = Field(default_factory=list)
 
 
 class RunManifest(BaseModel):
