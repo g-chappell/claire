@@ -14,7 +14,16 @@ export default function PlanGenerate() {
   useEffect(() => {
     if (!runId) { setRun(null); return; }
     (async () => {
-      try { setRun(await getRun(runId)); } catch { setRun(null); }
+      try {
+        const payload = await getRun(runId);            // { run, requirement, ... }
+        const r = payload.run ?? payload;               // tolerate either shape
+        const priority = payload.requirement?.priority  // priority is on requirement
+          ?? r.priority
+          ?? null;
+        setRun({ ...r, priority });                     // keep UI unchanged
+      } catch {
+        setRun(null);
+      }
     })();
   }, [runId]);
 
@@ -74,7 +83,7 @@ export default function PlanGenerate() {
           <div className="grid md:grid-cols-3 gap-2">
             <div><span className="opacity-60">ID: </span><span className="font-mono">{run.id}</span></div>
             <div><span className="opacity-60">Title: </span>{run.title ?? "(untitled)"}</div>
-            <div><span className="opacity-60">Priority: </span>{run.priority ?? "-"}</div>
+            <div><span className="opacity-60">Status: </span>{run.status ?? "-"}</div>
           </div>
         </div>
       )}

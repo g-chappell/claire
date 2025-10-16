@@ -9,6 +9,7 @@ from app.storage.db import Base
 class RunORM(Base):
     __tablename__ = "runs"
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    title: Mapped[str | None] = mapped_column(String(200), nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="DRAFT")
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -104,7 +105,7 @@ class StoryORM(Base):
     id: Mapped[str] = mapped_column(String(40), primary_key=True)
     run_id: Mapped[str] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"))
     requirement_id: Mapped[str] = mapped_column(ForeignKey("requirements.id", ondelete="CASCADE"))
-    epic_id: Mapped[str | None] = mapped_column(ForeignKey("epics.id", ondelete="SET NULL"), nullable=True)
+    epic_id: Mapped[str] = mapped_column(ForeignKey("epics.id", ondelete="SET NULL"), nullable=True)
     title: Mapped[str] = mapped_column(String(200))
     description: Mapped[str] = mapped_column(Text, default="")
     priority_rank: Mapped[int | None] = mapped_column(Integer, nullable=True)

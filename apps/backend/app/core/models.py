@@ -74,7 +74,7 @@ class PlanBundle(BaseModel):
 
 # ====== Run / Manifest ======
 class RunCreate(BaseModel):
-    title: str = Field(..., description="Short label for the run")
+    run_title: Optional[str] = Field(default=None, max_length=200, description="Short description for the run")
     requirement_title: str
     requirement_description: str
     constraints: list[str] = Field(default_factory=list)
