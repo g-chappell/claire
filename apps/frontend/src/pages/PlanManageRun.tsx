@@ -103,7 +103,8 @@ export default function PlanManageRun() {
     if (!ok) return;
     setBusy(true);
     try {
-      const res = await deleteRun(selectedId);
+      const id = selectedId;
+      const res = await deleteRun(id);
       // show counts if backend returned them
       if (res.ok && res.deleted) {
         alert(
@@ -112,10 +113,9 @@ export default function PlanManageRun() {
         );
       }
       // hard refresh list; if current selection disappeared, UI clears accordingly
-      setRuns(rs => rs.filter(r => r.id !== selectedId));
+      setRuns(rs => rs.filter(r => r.id !== id));
       setSelectedId("");
       setDetail(null);
-      await deleteRun(selectedId);
       await refreshRuns(false); // list again from backend
     } finally {
       setBusy(false);
