@@ -18,7 +18,8 @@ class RunSummary(BaseModel):
     id: str
     title: Optional[str] = None
     status: Optional[str] = None
-    created_at: Optional[datetime] = None
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
 
 class EpicOut(BaseModel):
     id: str
@@ -44,8 +45,8 @@ def _has_attr(model, name: str) -> bool:
 def list_runs(db: Session = Depends(get_db)):
     q = db.query(RunORM)
     # Prefer created_at desc if present; fall back to id desc
-    if _has_attr(RunORM, "created_at"):
-        q = q.order_by(RunORM.created_at.desc())
+    if _has_attr(RunORM, "started_at"):
+        q = q.order_by(RunORM.started_at.desc())
     else:
         q = q.order_by(RunORM.id.desc())
     rows = q.all()
@@ -54,7 +55,8 @@ def list_runs(db: Session = Depends(get_db)):
             id=r.id,
             title=getattr(r, "title", None),
             status=getattr(r, "status", None),
-            created_at=getattr(r, "created_at", None),
+            started_at=getattr(r, "started_at", None),
+            finished_at=getattr(r, "finished_at", None),
         )
         for r in rows
     ]
@@ -62,8 +64,8 @@ def list_runs(db: Session = Depends(get_db)):
 @router.get("/runs/last", response_model=RunSummary)
 def get_last_run(db: Session = Depends(get_db)):
     q = db.query(RunORM)
-    if _has_attr(RunORM, "created_at"):
-        q = q.order_by(RunORM.created_at.desc())
+    if _has_attr(RunORM, "started_at"):
+        q = q.order_by(RunORM.started_at.desc())
     else:
         q = q.order_by(RunORM.id.desc())
     r = q.first()
@@ -73,7 +75,8 @@ def get_last_run(db: Session = Depends(get_db)):
         id=r.id,
         title=getattr(r, "title", None),
         status=getattr(r, "status", None),
-        created_at=getattr(r, "created_at", None),
+        started_at=getattr(r, "started_at", None),
+        finished_at=getattr(r, "finished_at", None),
     )
 
 @router.get("/runs/{run_id}/epics", response_model=List[EpicOut])

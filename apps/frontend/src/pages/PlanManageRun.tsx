@@ -187,13 +187,6 @@ export default function PlanManageRun() {
           </select>
 
           <button
-            onClick={() => refreshRuns(true)}
-            className="px-3 py-2 rounded-md bg-slate-700 hover:bg-slate-600"
-          >
-            Refresh
-          </button>
-
-          <button
             onClick={onDelete}
             disabled={!selectedId || busy}
             className="px-3 py-2 rounded-md bg-red-600 hover:bg-red-500 disabled:opacity-50"

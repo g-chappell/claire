@@ -29,7 +29,12 @@ def create_run(payload: RunCreate, db: Session = Depends(get_db)):
     """Create a run + manifest + initial requirement row."""
     run_id = str(uuid.uuid4())
 
-    run = RunORM(id=run_id, status="DRAFT")
+    payload_title = getattr(payload, "run_title", None) or \
+                    getattr(payload, "title", None) or \
+                    getattr(payload, "requirement_title", None) or ""
+
+    run = RunORM(id=run_id, status="DRAFT", title=(payload_title or "")[:200])  # <-- set title
+
     db.add(run)
 
     manifest = RunManifestORM(
@@ -97,6 +102,7 @@ def get_run(run_id: str, db: Session = Depends(get_db)):
 
     run_out = {
         "id": run.id,
+        "title": getattr(run, "title", None),   # <-- include title
         "status": run.status,
         "started_at": getattr(run, "started_at", None),
         "finished_at": getattr(run, "finished_at", None),
