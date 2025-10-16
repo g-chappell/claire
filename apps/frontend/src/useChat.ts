@@ -1,10 +1,10 @@
 import { useState } from "react";
 
-export interface Msg {
-  id: number;
+export type ChatMessage = {
   role: "user" | "assistant";
-  text: string;
-}
+  content: string;
+  timestamp: number;
+};
 
 const defaultBase =
   window.location.hostname.endsWith("blacksail.dev")
@@ -14,25 +14,45 @@ const defaultBase =
 const API_BASE = (import.meta.env.VITE_API_URL ?? defaultBase).replace(/\/$/, "");
 
 export function useChat() {
-  const [messages, setMessages] = useState<Msg[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
 
   async function send(userText: string) {
-    if (!userText.trim()) return;
-    const id = Date.now();
-    setMessages((m) => [...m, { id, role: "user", text: userText }]);
-    setLoading(true);
+    const trimmed = userText.trim();
+    if (!trimmed) return;
 
+    // echo user message
+    setMessages((m) => [
+      ...m,
+      { role: "user", content: trimmed, timestamp: Date.now() },
+    ]);
+
+    setLoading(true);
     try {
       const res = await fetch(`${API_BASE}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: userText }),
+        body: JSON.stringify({ message: trimmed }),
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
       const data = await res.json();
-      setMessages((m) => [...m, { id: id + 1, role: "assistant", text: data.reply }]);
-    } catch (err) {
-      setMessages((m) => [...m, { id: id + 1, role: "assistant", text: String(err) }]);
+      const reply =
+        typeof data.reply === "string" ? data.reply : JSON.stringify(data);
+
+      setMessages((m) => [
+        ...m,
+        { role: "assistant", content: reply, timestamp: Date.now() },
+      ]);
+    } catch (err: any) {
+      setMessages((m) => [
+        ...m,
+        {
+          role: "assistant",
+          content: `⚠️ ${err?.message ?? String(err)}`,
+          timestamp: Date.now(),
+        },
+      ]);
     } finally {
       setLoading(false);
     }
