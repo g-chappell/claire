@@ -34,7 +34,7 @@ services:
 
   # ---- Backend API (FastAPI + Uvicorn) ----
   backend:
-    image: ghcr.io/g-chappell/claire-backend:v0.1.0   # <— use your pushed tag
+    image: ghcr.io/g-chappell/claire-backend:v0.3.0   # <— use your pushed tag
     env_file:
       - ../../.env                                    # server-side backend env (prod)
     environment:
@@ -63,7 +63,7 @@ services:
 
   # ---- Frontend (Vite build served by Nginx) ----
   frontend:
-    image: ghcr.io/g-chappell/claire-frontend:v0.1.0  # <— use your pushed tag
+    image: ghcr.io/g-chappell/claire-frontend:v0.3.0  # <— use your pushed tag
     # NOTE: Vite reads env at build time. The running Nginx container
     # does not use .env.local. Keep this line removed to avoid confusion.
     # env_file:

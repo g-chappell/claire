@@ -29,6 +29,12 @@ export default function PlanView() {
     return map;
   }, [bundle]);
 
+  const productVision = bundle?.product_vision;
+  const goals = productVision?.goals ?? [];
+  const personas = productVision?.personas ?? [];
+  const features = productVision?.features ?? [];
+  const designNotes = bundle?.design_notes ?? [];
+
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-semibold">View Plan</h1>
@@ -53,15 +59,15 @@ export default function PlanView() {
             <div className="grid md:grid-cols-3 gap-4">
               <div>
                 <div className="opacity-70 text-sm mb-1">Goals</div>
-                <ul className="list-disc ml-5 space-y-1">{bundle.product_vision.goals.map((g,i)=><li key={i}>{g}</li>)}</ul>
+                <ul className="list-disc ml-5 space-y-1">{goals.map((g,i)=><li key={i}>{g}</li>)}</ul>
               </div>
               <div>
                 <div className="opacity-70 text-sm mb-1">Personas</div>
-                <ul className="list-disc ml-5 space-y-1">{bundle.product_vision.personas.map((p,i)=><li key={i}>{p}</li>)}</ul>
+                <ul className="list-disc ml-5 space-y-1">{personas.map((p,i)=><li key={i}>{p}</li>)}</ul>
               </div>
               <div>
                 <div className="opacity-70 text-sm mb-1">Features</div>
-                <ul className="list-disc ml-5 space-y-1">{bundle.product_vision.features.map((f,i)=><li key={i}>{f}</li>)}</ul>
+                <ul className="list-disc ml-5 space-y-1">{features.map((f,i)=><li key={i}>{f}</li>)}</ul>
               </div>
             </div>
           </Collapsible>
@@ -141,10 +147,10 @@ export default function PlanView() {
           </div>
 
           {/* Design notes */}
-          {!!bundle.design_notes.length && (
+          {!!designNotes.length && (
             <Collapsible title="Design Notes">
               <div className="grid md:grid-cols-2 gap-3">
-                {bundle.design_notes.map((dn) => (
+                {designNotes.map((dn) => (
                   <div key={dn.id} className="border border-slate-700 rounded-lg p-3">
                     <div className="flex justify-between">
                       <div className="font-semibold">{dn.title}</div>

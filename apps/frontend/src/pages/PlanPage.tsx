@@ -1,6 +1,20 @@
 // src/PlanPage.tsx
 import { useEffect, useMemo, useState } from "react";
-import { json, API_BASE } from "../api";
+
+// add this helper
+async function json<T>(path: string, init?: RequestInit): Promise<T> {
+  const base = (import.meta as any).env?.VITE_API_URL ?? "";
+  const res = await fetch(`${base}${path}`, {
+    // set JSON header only if you pass a body; preserve any custom headers
+    headers: {
+      ...(init?.body ? { "Content-Type": "application/json" } : {}),
+      ...(init?.headers ?? {}),
+    },
+    ...init,
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+  return res.json() as Promise<T>;
+}
 
 
 type Acceptance = { story_id: string; gherkin: string };
