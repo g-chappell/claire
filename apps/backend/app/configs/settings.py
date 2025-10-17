@@ -1,51 +1,54 @@
-# apps/backend/app/configs/settings.py
 from __future__ import annotations
 from functools import lru_cache
+from typing import Optional, Any
 
-# Pydantic v2 (pydantic-settings) fallback to v1
+# Detect pydantic v2 vs v1 without confusing the type checker
 try:
-    from pydantic_settings import BaseSettings, SettingsConfigDict  # v2
+    from pydantic_settings import BaseSettings as V2BaseSettings  # v2
     V2 = True
 except Exception:
-    from pydantic import BaseSettings  # v1
-    SettingsConfigDict = None  # type: ignore
+    from pydantic import BaseSettings as V1BaseSettings            # v1
     V2 = False
 
 
+# Common field mixin (pure Python, no BaseSettings here)
+class _Common:
+    # App
+    APP_NAME: str = "Cognitive Learning Agents for Iterative Reflection and Explanation"
+    DEBUG: bool = False
+    FRONTEND_ORIGIN: Optional[str] = None
+
+    # LLM (informational)
+    LLM_PROVIDER: Optional[str] = None
+    LLM_MODEL: str = "claude-3-7-sonnet-20250219"
+    TEMPERATURE: float = 0.2
+
+    # DB (unified)
+    DATABASE_URL: str = "sqlite:///./data/dev.db"  # dev default; prod overrides via env
+
+    # Back-compat alias for any old code using DB_DSN
+    @property
+    def DB_DSN(self) -> str:
+        return self.DATABASE_URL
+
+
 if V2:
-    class Settings(BaseSettings):
-        # App
-        APP_NAME: str = "CLAIRE Backend"
-        DEBUG: bool = False
-        FRONTEND_ORIGIN: str | None = None  # keep as str for compatibility
+    # Pydantic v2 settings
+    class SettingsV2(_Common, V2BaseSettings):  # type: ignore[misc]
+        # v2 uses model_config (dict is fine; avoids SettingsConfigDict type issues)
+        model_config = {"env_file": ".env", "extra": "ignore"}
 
-        # LLM (informational for manifest)
-        LLM_PROVIDER: str | None = None
-        LLM_MODEL: str = "claude-3-7-sonnet-20250219"
-        TEMPERATURE: float = 0.2
-
-        # DB
-        DB_DSN: str = "sqlite:///./data/dev.db"
-
-        # pydantic-settings v2 config
-        model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    Settings = SettingsV2  # runtime alias
 else:
-    class Settings(BaseSettings):  # Pydantic v1
-        APP_NAME: str = "CLAIRE Backend"
-        DEBUG: bool = False
-        FRONTEND_ORIGIN: str | None = None
-
-        LLM_PROVIDER: str | None = None
-        LLM_MODEL: str = "claude-3-7-sonnet-20250219"
-        TEMPERATURE: float = 0.2
-
-        DB_DSN: str = "sqlite:///./data/dev.db"
-
+    # Pydantic v1 settings
+    class SettingsV1(_Common, V1BaseSettings):  # type: ignore[misc]
         class Config:
             env_file = ".env"
             case_sensitive = True
 
+    Settings = SettingsV1  # runtime alias
+
 
 @lru_cache()
-def get_settings() -> Settings:
+def get_settings() -> Any:
     return Settings()

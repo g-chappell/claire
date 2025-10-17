@@ -1,4 +1,4 @@
-version: "3.9"
+version: "1.0"
 
 # A small private network for our containers to talk to each other
 networks:
@@ -6,6 +6,7 @@ networks:
 
 # Volumes = “named folders” Docker manages for persistence
 volumes:
+  backend_data:  # backend data
   letsencrypt:   # Traefik's SSL certificates live here
   rag_data:      # future vector store (RAG) lives here
   logs_data:     # backend logs live here
@@ -34,14 +35,16 @@ services:
 
   # ---- Backend API (FastAPI + Uvicorn) ----
   backend:
-    image: ghcr.io/g-chappell/claire-backend:v0.3.0   # <— use your pushed tag
+    image: ghcr.io/g-chappell/claire-backend:v0.3.1   # <— use your pushed tag
     env_file:
       - ../../.env                                    # server-side backend env (prod)
     environment:
       - FRONTEND_ORIGIN=https://app.blacksail.dev
       - RAG_STORE_PATH=/data/vector
       - LOG_FILE=/data/logs/llm_responses.log
+      - DATABASE_URL=sqlite:////data/app.db
     volumes:
+      - backend_data:/data
       - rag_data:/data/vector
       - logs_data:/data/logs
     expose:
@@ -63,7 +66,7 @@ services:
 
   # ---- Frontend (Vite build served by Nginx) ----
   frontend:
-    image: ghcr.io/g-chappell/claire-frontend:v0.3.0  # <— use your pushed tag
+    image: ghcr.io/g-chappell/claire-frontend:v0.3.1  # <— use your pushed tag
     # NOTE: Vite reads env at build time. The running Nginx container
     # does not use .env.local. Keep this line removed to avoid confusion.
     # env_file:

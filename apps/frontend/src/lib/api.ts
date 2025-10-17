@@ -1,6 +1,12 @@
 import type { RunCreate, RunSummary, PlanBundle } from "../types";
 
-const BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000";
+const BASE =
+  import.meta.env.VITE_API_BASE ||
+  import.meta.env.VITE_API_URL ||
+  import.meta.env.NEXT_PUBLIC_API_URL ||
+  (location.hostname.endsWith("blacksail.dev")
+    ? "https://api.blacksail.dev"
+    : "http://127.0.0.1:8000");
 
 const noStore: RequestInit = { cache: "no-store", headers: { "cache-control": "no-store" } };
 
