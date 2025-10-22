@@ -1,13 +1,14 @@
 export type Priority = "Must" | "Should" | "Could";
 
-export interface RunCreate {
-  title: string;
+export type RunCreate = {
+  title?: string;            // optional label for the run row
+  run_title?: string;        // tolerated by backend
   requirement_title: string;
   requirement_description: string;
   constraints?: string[];
-  priority?: Priority;
   non_functionals?: string[];
-}
+  priority?: "Must" | "Should" | "Could";
+};
 
 export interface RunSummary {
   id: string;
@@ -38,3 +39,30 @@ export interface PlanBundle {
   stories: Story[];
   design_notes?: DesignNote[];
 }
+
+export type VisionSolution = {
+  product_vision: ProductVision;
+  technical_solution: TechnicalSolution;
+};
+
+
+export type Requirement = {
+  id: string;
+  title: string;
+  description: string;
+  constraints?: string[];
+  non_functionals?: string[];
+  priority?: "Must" | "Should" | "Could";
+};
+
+export type RunDetail = {
+  run: {
+    id: string;
+    title?: string | null;
+    status: string;
+    started_at?: string | null;
+    finished_at?: string | null;
+  };
+  manifest?: { data?: any } | null;
+  requirement?: Requirement | null;
+};

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import RunPicker from "../components/RunPicker";
-import { generatePlan, getRun } from "../lib/api";
+import { finalisePlan, getRun } from "../lib/api";
 import type { PlanBundle } from "../types";
 import StatPill from "../components/StatPill";
 
@@ -17,10 +17,8 @@ export default function PlanGenerate() {
       try {
         const payload = await getRun(runId);            // { run, requirement, ... }
         const r = payload.run ?? payload;               // tolerate either shape
-        const priority = payload.requirement?.priority  // priority is on requirement
-          ?? r.priority
-          ?? null;
-        setRun({ ...r, priority });                     // keep UI unchanged
+        const priority = payload.requirement?.priority ?? null; // only from requirement
+        setRun({ ...r, priority });
       } catch {
         setRun(null);
       }
@@ -48,18 +46,29 @@ export default function PlanGenerate() {
     };
   }, [bundle]);
 
-  async function runPlan(force = true) {
+  async function runPlan() {
     if (!runId) return;
-    setBusy(true); setMsg(null);
+    setBusy(true);
+    setMsg(null);
     const t0 = performance.now();
     try {
-      const b = await generatePlan(runId, force);
+      // NEW: only generate the remainder using the stored PV/TS
+      const b = await finalisePlan(runId);
       setBundle(b);
       const ms = Math.round(performance.now() - t0);
-      setMsg(`Plan generated in ${ms}ms`);
-    } catch (e:any) {
-      setMsg(`Error: ${e.message ?? e}`);
-    } finally { setBusy(false); }
+      setMsg(`Finalised (remainder generated) in ${ms}ms`);
+    } catch (e: any) {
+      const msg = String(e?.message ?? e);
+      if (/vision\/solution not found/i.test(msg) || /404/.test(msg)) {
+        setMsg(
+          "This run doesn't have Product Vision / Technical Solution yet. Go to Manage Run → Generate first."
+        );
+      } else {
+        setMsg(`Error: ${msg}`);
+      }
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -71,7 +80,7 @@ export default function PlanGenerate() {
         <button
           className="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50"
           disabled={!runId || busy}
-          onClick={() => runPlan(true)}
+          onClick={runPlan}
         >
           Generate / Re-Plan
         </button>
