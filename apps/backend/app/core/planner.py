@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import Any, Dict, Optional, Literal
 
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import Session
@@ -14,9 +15,114 @@ from app.storage.models import (
 )
 from app.agents.meta.product_manager_llm import ProductManagerLLM
 
+Priority = Literal["Must", "Should", "Could"]
+
+def _coerce_priority(p: Optional[str]) -> Priority:
+    s = (p or "Should").strip().lower()
+    if s.startswith("must"):
+        return "Must"
+    if s.startswith("could"):
+        return "Could"
+    return "Should"
+
 pm = ProductManagerLLM()
 
+# --- NEW: persist only PV/TS (used by the stage 1 gate) ---
+def _persist_vision_solution(db: Session, run_id: str,
+                             vision: ProductVision,
+                             solution: TechnicalSolution) -> None:
+    db.merge(ProductVisionORM(run_id=run_id, data=vision.model_dump()))
+    db.merge(TechnicalSolutionORM(run_id=run_id, data=solution.model_dump()))
+    db.commit()
 
+
+# --- NEW: stage 1 - generate PV/TS only ---
+def generate_vision_solution(db: Session, run_id: str) -> tuple[ProductVision, TechnicalSolution]:
+    """Run Vision + Architecture chains and persist only those results."""
+    req: RequirementORM | None = (
+        db.query(RequirementORM)
+        .filter(RequirementORM.run_id == run_id)
+        .order_by(RequirementORM.id.asc())
+        .first()
+    )
+    if not req:
+        raise ValueError("requirement not found for run")
+
+    p_req = Requirement(
+        id=req.id,
+        title=req.title,
+        description=req.description,
+        constraints=req.constraints or [],
+        priority=_coerce_priority(getattr(req, "priority", None)),
+        non_functionals=req.non_functionals or [],
+    )
+
+    pv, ts = pm.plan_vision_solution(p_req.model_dump())
+    _persist_vision_solution(db, run_id, pv, ts)
+    return pv, ts
+
+
+# --- NEW: stage 2 - finalise the plan from PV/TS (plus optional overrides) ---
+def finalise_plan(db: Session, run_id: str,
+                  vision_override: dict | None = None,
+                  solution_override: dict | None = None) -> PlanBundle:
+    """
+    Produce epics, stories, acceptance, tasks, and design notes using the
+    currently stored PV/TS, optionally applying overrides from the request.
+    """
+    # Load PV/TS (or use provided overrides)
+    pv_row = db.query(ProductVisionORM).filter_by(run_id=run_id).first()
+    ts_row = db.query(TechnicalSolutionORM).filter_by(run_id=run_id).first()
+
+    if not pv_row and not vision_override:
+        raise ValueError("product vision not found for run")
+    if not ts_row and not solution_override:
+        raise ValueError("technical solution not found for run")
+
+    pv_data: Optional[dict] = None
+    ts_data: Optional[dict] = None
+
+    if vision_override is not None:
+        pv_data = vision_override
+    elif pv_row is not None:
+        pv_data = pv_row.data
+
+    if solution_override is not None:
+        ts_data = solution_override
+    elif ts_row is not None:
+        ts_data = ts_row.data
+
+    if pv_data is None:
+        raise ValueError("product vision not found for run")
+    if ts_data is None:
+        raise ValueError("technical solution not found for run")
+
+    pv = ProductVision(**pv_data)
+    ts = TechnicalSolution(**ts_data)
+
+    # Load requirement (same source used by plan_run)
+    req: RequirementORM | None = (
+        db.query(RequirementORM)
+        .filter(RequirementORM.run_id == run_id)
+        .order_by(RequirementORM.id.asc())
+        .first()
+    )
+    if not req:
+        raise ValueError("requirement not found for run")
+
+    p_req = Requirement(
+        id=req.id,
+        title=req.title,
+        description=req.description,
+        constraints=req.constraints or [],
+        priority=_coerce_priority(getattr(req, "priority", None)),
+        non_functionals=req.non_functionals or [],
+    )
+
+    # Generate remaining artefacts and persist full bundle
+    bundle = pm.plan_remaining(p_req.model_dump(), pv, ts)
+    _persist_plan(db, run_id, req, bundle)
+    return bundle
 
 def _persist_plan(db: Session, run_id: str, requirement: RequirementORM, bundle: PlanBundle) -> None:
     # product vision & technical solution as JSON blobs
@@ -57,12 +163,12 @@ def _persist_plan(db: Session, run_id: str, requirement: RequirementORM, bundle:
     db.query(TaskORM).filter_by(run_id=run_id).delete(synchronize_session=False)
     for s in bundle.stories:
         for t in s.tasks:
-            kwargs = {
-                "id": t.id,
-                "run_id": run_id,
-                "story_id": s.id,
-                "title": t.title,
-            }
+            kwargs: Dict[str, Any] = {
+            "id": t.id,
+            "run_id": run_id,
+            "story_id": s.id,
+            "title": t.title,
+        }
             if "order" in task_cols:
                 kwargs["order"] = t.order
             if "status" in task_cols:
@@ -72,9 +178,7 @@ def _persist_plan(db: Session, run_id: str, requirement: RequirementORM, bundle:
     # Design Notes (clear then write)
     db.query(DesignNoteORM).filter_by(run_id=run_id).delete(synchronize_session=False)
 
-    dn_cols = _columns(DesignNoteORM)
-
-    def _as_data_blob(dn: DesignNote) -> dict:
+    def _as_data_blob(dn: DesignNote) -> Dict[str, Any]:
         return {
             "title": dn.title,
             "kind": dn.kind,
@@ -85,10 +189,10 @@ def _persist_plan(db: Session, run_id: str, requirement: RequirementORM, bundle:
         }
 
     for dn in bundle.design_notes:
-        kwargs = {
-            "id": dn.id,
-            "run_id": run_id,
-        }
+        kwargs: Dict[str, Any] = {
+        "id": dn.id,
+        "run_id": run_id,
+    }
 
         # Required by your current schema
         if "scope" in dn_cols:
@@ -137,7 +241,7 @@ def plan_run(db: Session, run_id: str) -> PlanBundle:
 
     p_req = Requirement(
         id=req.id, title=req.title, description=req.description,
-        constraints=req.constraints or [], priority=req.priority or "Should",
+        constraints=req.constraints or [], priority=_coerce_priority(getattr(req, "priority", None)),
         non_functionals=req.non_functionals or [],
     )
 

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import RunPicker from "../components/RunPicker";
-import { loadPlan } from "../lib/api";
+import { getPlan as loadPlan } from "../lib/api";
 import type { PlanBundle, Epic, Story } from "../types";
 import Collapsible from "../components/Collapsible";
 

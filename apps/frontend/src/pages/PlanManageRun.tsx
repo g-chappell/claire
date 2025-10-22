@@ -4,17 +4,17 @@ import {
   deleteRun,
   getRun,
   listRuns,
+  generateVisionSolution,
+  getVisionSolution,
+  updateVisionSolution,
 } from "../lib/api";
-import type { RunCreate, RunSummary } from "../types";
 
-type RunDetail = {
-  run: { id: string; status: string; started_at?: string | null; finished_at?: string | null };
-  manifest?: any;
-  requirement?: {
-    id: string; title: string; description: string;
-    constraints?: string[]; priority?: string; non_functionals?: string[];
-  } | null;
-};
+import type { RunCreate, RunSummary, RunDetail, VisionSolution } from "../types";
+
+import ChipInput from "../components/ChipInput";
+import KeyValueInput from "../components/KeyValueInput";
+import LoadingButton from "../components/LoadingButton";
+import Badge from "../components/Badge";
 
 export default function PlanManageRun() {
   // ----- create form -----
@@ -22,6 +22,19 @@ export default function PlanManageRun() {
   const [reqTitle, setReqTitle] = useState("");
   const [reqDesc, setReqDesc] = useState("");
   const [busyCreate, setBusyCreate] = useState(false);
+
+    // ----- PV/TS gate -----
+  const [vs, setVS] = useState<VisionSolution | null>(null);
+  const [vsBusy, setVsBusy] = useState(false);
+  const [vsMsg, setVsMsg] = useState<string | null>(null);
+
+  const [goals, setGoals] = useState<string[]>([]);
+  const [personas, setPersonas] = useState<string[]>([]);
+  const [features, setFeatures] = useState<string[]>([]);
+  const [stack, setStack] = useState<string[]>([]);
+  const [modules, setModules] = useState<string[]>([]);
+  const [interfaces, setInterfaces] = useState<Record<string, string>>({});
+  const [decisions, setDecisions] = useState<string[]>([]);
 
   // placeholders that explain how to fill it in
   const runTitlePH = "Short label, e.g. “Onboarding flow – v1”";
@@ -39,24 +52,69 @@ export default function PlanManageRun() {
   );
 
   async function refreshRuns(preserveSelection = false) {
-    const list = await listRuns();
-    setRuns(list);
-    if (!preserveSelection) {
+  const list = await listRuns();
+  setRuns(list);
+
+  if (!preserveSelection) {
+    const id = list[0]?.id ?? "";
+    setSelectedId(id);
+
+    if (id) {
+      const d = await getRun(id);
+      setDetail(d);
+      await loadVS(id); // fetch PV/TS and hydrate chip editors
+    } else {
+      // no runs — clear detail and chip editors
+      setDetail(null);
+      setVS(null);
+      setGoals([]);
+      setPersonas([]);
+      setFeatures([]);
+      setStack([]);
+      setModules([]);
+      setInterfaces({});
+      setDecisions([]);
+    }
+  } else {
+    // if current selection vanished, pick first (or clear)
+    if (selectedId && !list.some((r) => r.id === selectedId)) {
       const id = list[0]?.id ?? "";
       setSelectedId(id);
       if (id) {
         const d = await getRun(id);
         setDetail(d);
+        await loadVS(id);
       } else {
         setDetail(null);
+        setVS(null);
+        setGoals([]);
+        setPersonas([]);
+        setFeatures([]);
+        setStack([]);
+        setModules([]);
+        setInterfaces({});
+        setDecisions([]);
       }
-    } else {
-      // if current selection vanished, pick first (or clear)
-      if (selectedId && !list.some(r => r.id === selectedId)) {
-        const id = list[0]?.id ?? "";
-        setSelectedId(id);
-        setDetail(id ? await getRun(id) : null);
-      }
+    }
+  }
+}
+
+  async function loadVS(id: string) {
+    try {
+      const data = await getVisionSolution(id);
+      setVS(data);
+      setGoals(data.product_vision.goals ?? []);
+      setPersonas(data.product_vision.personas ?? []);
+      setFeatures(data.product_vision.features ?? []);
+      setStack(data.technical_solution.stack ?? []);
+      setModules(data.technical_solution.modules ?? []);
+      setInterfaces(data.technical_solution.interfaces ?? {});
+      setDecisions(data.technical_solution.decisions ?? []);
+      setVsMsg(null);
+    } catch {
+      setVS(null);
+      setGoals([]); setPersonas([]); setFeatures([]);
+      setStack([]); setModules([]); setInterfaces({}); setDecisions([]);
     }
   }
 
@@ -65,25 +123,38 @@ export default function PlanManageRun() {
   }, []);
 
   async function onCreate() {
-    const payload: RunCreate = {
-      title: title.trim() || "(untitled)",
-      requirement_title: reqTitle.trim() || "As a user, I want ...",
-      requirement_description: reqDesc.trim() || "Describe the requirement…",
-      constraints: [],
-      priority: "Should",
-      non_functionals: [],
-    };
-    setBusyCreate(true);
-    try {
-      const { run_id } = await createRun(payload);
-      // force a clean refresh and select the new one
-      await refreshRuns(true);
-      setSelectedId(run_id);
-      setDetail(await getRun(run_id));
-    } finally {
-      setBusyCreate(false);
-    }
+  const payload: RunCreate = {
+    title: title.trim() || "(untitled)",
+    requirement_title: reqTitle.trim() || "As a user, I want ...",
+    requirement_description: reqDesc.trim() || "Describe the requirement…",
+    constraints: [],
+    priority: "Should",
+    non_functionals: [],
+  };
+
+  setBusyCreate(true);
+  try {
+    const created = await createRun(payload);
+    // tolerate either shape:
+    // - { run_id: string }
+    // - { run: { id: string, ... }, manifest, requirement }
+    const newId =
+      (created as any)?.run_id ??
+      (created as any)?.run?.id ??
+      (created as any)?.id ??
+      "";
+
+    if (!newId) throw new Error("Create returned no run id");
+
+    // force a clean refresh and select the new one
+    await refreshRuns(true);
+    setSelectedId(newId);
+    setDetail(await getRun(newId));
+    await loadVS(newId);
+  } finally {
+    setBusyCreate(false);
   }
+}
 
   async function onSelect(id: string) {
     setSelectedId(id);
@@ -92,6 +163,7 @@ export default function PlanManageRun() {
     try {
       const d = await getRun(id);
       setDetail(d);
+      await loadVS(id);
     } finally {
       setBusy(false);
     }
@@ -99,26 +171,101 @@ export default function PlanManageRun() {
 
   async function onDelete() {
     if (!selectedId) return;
-    const ok = confirm("Delete this run and ALL associated artefacts? This cannot be undone.");
-    if (!ok) return;
+    if (!confirm("Delete this run and ALL associated artefacts?")) return;
     setBusy(true);
     try {
-      const id = selectedId;
-      const res = await deleteRun(id);
-      // show counts if backend returned them
-      if (res.ok && res.deleted) {
-        alert(
-          `Deleted. (counts)\n` +
-          Object.entries(res.deleted).map(([k, v]) => `• ${k}: ${v}`).join("\n")
-        );
+      const { deleted } = await deleteRun(selectedId);
+      if (deleted) {
+        alert("Deleted:\n" + Object.entries(deleted).map(([k,v])=>`• ${k}: ${v}`).join("\n"));
       }
-      // hard refresh list; if current selection disappeared, UI clears accordingly
-      setRuns(rs => rs.filter(r => r.id !== id));
-      setSelectedId("");
-      setDetail(null);
-      await refreshRuns(false); // list again from backend
+      await refreshRuns(false);
+    } finally { setBusy(false); }
+  }
+
+  async function onGenerateVS() {
+    if (!selectedId) return;
+    setVsBusy(true); setVsMsg(null);
+    try {
+      const data = await generateVisionSolution(selectedId);
+      setVS(data);
+      setGoals(data.product_vision.goals ?? []);
+      setPersonas(data.product_vision.personas ?? []);
+      setFeatures(data.product_vision.features ?? []);
+      setStack(data.technical_solution.stack ?? []);
+      setModules(data.technical_solution.modules ?? []);
+      setInterfaces(data.technical_solution.interfaces ?? {});
+      setDecisions(data.technical_solution.decisions ?? []);
+      setDetail(await getRun(selectedId)); // refresh badge (status=draft)
+      setVsMsg("Generated Product Vision & Technical Solution.");
+    } catch (e:any) {
+      setVsMsg(`Error: ${e.message ?? e}`);
     } finally {
-      setBusy(false);
+      setVsBusy(false);
+    }
+  }
+
+  async function onReloadVS() {
+    if (!selectedId) return;
+    setVsBusy(true);
+    try {
+      await loadVS(selectedId);
+      setVsMsg("Reloaded.");
+    } finally {
+      setVsBusy(false);
+    }
+  }
+
+  async function onRegenerateVS() {
+    if (!selectedId) return;
+    if (
+      goals.length || personas.length || features.length ||
+      stack.length || modules.length || decisions.length ||
+      Object.keys(interfaces).length
+    ) {
+      const ok = confirm("You have unsaved edits. Re-generate will overwrite. Continue?");
+      if (!ok) return;
+    }
+    setVsBusy(true); setVsMsg(null);
+    try {
+      const data = await generateVisionSolution(selectedId);
+      setVS(data);
+      setGoals(data.product_vision.goals ?? []);
+      setPersonas(data.product_vision.personas ?? []);
+      setFeatures(data.product_vision.features ?? []);
+      setStack(data.technical_solution.stack ?? []);
+      setModules(data.technical_solution.modules ?? []);
+      setInterfaces(data.technical_solution.interfaces ?? {});
+      setDecisions(data.technical_solution.decisions ?? []);
+      setVsMsg("Re-generated PV/TS.");
+    } catch (e:any) {
+      setVsMsg(e.message ?? "Failed to re-generate PV/TS");
+    } finally {
+      setVsBusy(false);
+    }
+  }
+
+  async function onSaveVS() {
+    if (!selectedId) return;
+    setVsBusy(true); setVsMsg(null);
+    try {
+      const payload = {
+        product_vision: {
+          id: vs?.product_vision.id ?? "PV",
+          goals, personas, features,
+        },
+        technical_solution: {
+          id: vs?.technical_solution.id ?? "TS",
+          stack, modules, interfaces, decisions,
+        },
+      };
+      const updated = await updateVisionSolution(selectedId, payload);
+      setVS(updated);
+      setDetail(await getRun(selectedId)); // keep badge accurate
+      setVsMsg("Saved.");
+    } catch (e:any) {
+      setVsMsg(`Error: ${e.message ?? e}`);
+    } finally {
+      setVsBusy(false);
     }
   }
 
@@ -207,6 +354,83 @@ export default function PlanManageRun() {
                 <div>Finished: {detail.run.finished_at ?? "—"}</div>
               </div>
             </div>
+
+            {/* ===== Product Vision & Technical Solution (Stage Gate) ===== */}
+<section className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
+  <div className="flex items-center justify-between mb-3">
+    <h2 className="text-lg font-semibold">Product Vision & Technical Solution</h2>
+    <Badge tone={detail?.manifest?.data?.vision_solution_status === "approved" ? "emerald" : "amber"}>
+      Gate: {detail?.manifest?.data?.vision_solution_status ?? "—"}
+    </Badge>
+  </div>
+
+  <div className="flex items-center gap-2 mb-4">
+    <LoadingButton
+      className="bg-emerald-600 hover:bg-emerald-500"
+      loading={vsBusy}
+      disabled={!selectedId}
+      onClick={onGenerateVS}
+    >
+      Generate
+    </LoadingButton>
+    <LoadingButton
+      className="bg-slate-700 hover:bg-slate-600"
+      loading={vsBusy}
+      disabled={!selectedId}
+      onClick={onReloadVS}
+    >
+      Reload
+    </LoadingButton>
+    <LoadingButton
+      className="bg-amber-600 hover:bg-amber-500"
+      loading={vsBusy}
+      disabled={!selectedId}
+      onClick={onRegenerateVS}
+    >
+      Re-generate
+    </LoadingButton>
+    <div className="text-sm opacity-80">{vsMsg}</div>
+  </div>
+
+  {vs ? (
+    <div className="grid md:grid-cols-2 gap-4">
+      <div className="border border-slate-800 rounded-lg p-3">
+        <h3 className="font-semibold mb-3">Product Vision</h3>
+        <ChipInput label="Goals" value={goals} onChange={setGoals} />
+        <div className="h-3" />
+        <ChipInput label="Personas" value={personas} onChange={setPersonas} />
+        <div className="h-3" />
+        <ChipInput label="Features" value={features} onChange={setFeatures} />
+      </div>
+
+      <div className="border border-slate-800 rounded-lg p-3">
+        <h3 className="font-semibold mb-3">Technical Solution</h3>
+        <ChipInput label="Stack" value={stack} onChange={setStack} />
+        <div className="h-3" />
+        <ChipInput label="Modules" value={modules} onChange={setModules} />
+        <div className="h-3" />
+        <KeyValueInput label="Interfaces (k:v, comma-separated)" value={interfaces} onChange={setInterfaces} />
+        <div className="h-3" />
+        <ChipInput label="Decisions" value={decisions} onChange={setDecisions} />
+      </div>
+    </div>
+  ) : (
+    <div className="text-sm opacity-70">
+      No PV/TS yet — click <b>Generate</b> to draft the Product Vision & Technical Solution.
+    </div>
+  )}
+
+  <div className="mt-4">
+    <LoadingButton
+      className="bg-indigo-600 hover:bg-indigo-500"
+      loading={vsBusy}
+      disabled={!selectedId || !vs}
+      onClick={onSaveVS}
+    >
+      Save
+    </LoadingButton>
+  </div>
+</section>
 
             <div>
               <h3 className="font-semibold">Requirement</h3>
