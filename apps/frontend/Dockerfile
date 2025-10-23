@@ -26,8 +26,8 @@ RUN npm run build
 # ---------- Run stage: serve files with Nginx ----------
 FROM nginx:alpine AS runner
 COPY --from=builder /app/dist /usr/share/nginx/html
-# (Optional SPA fallback)
-# COPY infra/docker/nginx.vite.conf /etc/nginx/conf.d/default.conf
+# (SPA fallback)
+COPY infra/nginx/frontend.conf /etc/nginx/conf.d/default.conf
 
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]
