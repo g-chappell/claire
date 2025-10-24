@@ -5,6 +5,7 @@ import App from "./App";
 import "./index.css";
 
 // pages
+import CreateRun from "./pages/CreateRun";
 import ChatPage from "./pages/ChatPage";
 import SettingsPage from "./pages/SettingsPage";
 import PlanManageRun from "./pages/PlanManageRun";
@@ -17,6 +18,7 @@ const router = createBrowserRouter([
     element: <App />,
     children: [
       { index: true, element: <Navigate to="/chat" replace /> },
+      { path: "plan/create", element: <CreateRun />},
       { path: "chat", element: <ChatPage /> },
       { path: "plan/manage", element: <PlanManageRun /> },
       { path: "plan/generate", element: <PlanGenerate /> },
