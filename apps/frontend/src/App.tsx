@@ -18,6 +18,7 @@ export default function App() {
           <NavLink to="/chat" className={({isActive})=> `${link} ${isActive?active:""}`}>Chat</NavLink>
 
           <div className="mt-4 text-xs uppercase tracking-wide opacity-60 px-4">Plan</div>
+          <NavLink to="/plan/create"   className={({isActive})=> `${link} ${isActive?active:""}`}>Create Run</NavLink>
           <NavLink to="/plan/manage"   className={({isActive})=> `${link} ${isActive?active:""}`}>Manage Run</NavLink>
           <NavLink to="/plan/generate" className={({isActive})=> `${link} ${isActive?active:""}`}>Generate Plan</NavLink>
           <NavLink to="/plan/view"     className={({isActive})=> `${link} ${isActive?active:""}`}>View Plan</NavLink>

@@ -8,10 +8,12 @@ apps/backend/.env.*
 apps/frontend/.env.local
 apps/frontend/.env.*
 !apps/frontend/.env.local.example
+**/.envrc
+.python-version
 
-# --- Python ---
-__pycache__/
-*.py[cod]
+# --- Python / backend artifacts ---
+**/__pycache__/
+**/*.py[cod]
 *$py.class
 .venv/
 .venvs/
@@ -20,34 +22,51 @@ __pycache__/
 **/.venvs/
 **/env/
 **/envs/
-.direnv/
-.python-version
-.envrc
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 coverage.xml
 htmlcov/
+.coverage*
+# If you ever create a local sqlite file in-repo:
+# apps/backend/*.db
 
-# --- Node / Frontend ---
-node_modules/
-dist/
-build/
-.vite/
-.next/
-.vercel/
-*.local
+# --- Node / frontend artifacts ---
+**/node_modules/
+**/dist/
+**/build/
+**/.vite/
+**/.cache/
+**/coverage/
+*.tsbuildinfo
+# package manager logs
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+# optional caches
+.eslintcache
+.stylelintcache
+# registry config (avoid committing tokens)
+.npmrc
+!.npmrc.example
 
-# --- OS/Editor ---
+# --- OS / Editors ---
 .DS_Store
+Thumbs.db
 .vscode/
 .idea/
+*.local
 
 # --- Data & logs (monorepo) ---
 apps/backend/data/*
 !apps/backend/data/.gitkeep
 logs/
-*.log
+**/*.log
+
+# --- Traefik / certs (never commit ACME store) ---
+infra/traefik/acme.json
+letsencrypt/
+infra/traefik/letsencrypt/
 
 # --- Docker ---
 *.pid
