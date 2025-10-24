@@ -1,8 +1,8 @@
 from __future__ import annotations
 import uuid
 import logging
-from typing import Optional, cast
-
+from typing import Literal, Optional, cast
+from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -137,3 +137,31 @@ def delete_run_api(run_id: str, db: Session = Depends(get_db)):
     except Exception:
         logger.exception("delete run failed")
         raise HTTPException(status_code=500, detail="failed to delete run")
+    
+class GateUpdate(BaseModel):
+    vision_solution_status: Literal["approved", "draft", "rejected"]
+
+@router.get("/runs/{run_id}/gate")
+def get_gate(run_id: str, db: Session = Depends(get_db)):
+    manifest: Optional[RunManifestORM] = (
+        db.query(RunManifestORM).filter_by(run_id=run_id).first()
+    )
+    status = (manifest.data or {}).get("vision_solution_status") if manifest else None
+    return {"run_id": run_id, "vision_solution_status": status}
+
+@router.patch("/runs/{run_id}/gate")
+def update_gate(run_id: str, body: GateUpdate, db: Session = Depends(get_db)):
+    manifest: Optional[RunManifestORM] = (
+        db.query(RunManifestORM).filter_by(run_id=run_id).first()
+    )
+    if manifest is None:
+        manifest = RunManifestORM(run_id=run_id, data={})
+        db.add(manifest)
+
+    data = dict(manifest.data or {})
+    data["vision_solution_status"] = body.vision_solution_status
+    manifest.data = data
+
+    db.commit()
+    db.refresh(manifest)
+    return {"run_id": run_id, "vision_solution_status": manifest.data.get("vision_solution_status")}
