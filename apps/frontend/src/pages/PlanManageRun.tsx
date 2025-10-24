@@ -11,6 +11,7 @@ import ChipInput from "../components/ChipInput";
 import KeyValueInput from "../components/KeyValueInput";
 import LoadingButton from "../components/LoadingButton";
 import Badge from "../components/Badge";
+import { commitMemory, updateGateStatus, getGateStatus } from "../lib/api";
 
 // Reusable collapsible section
 function CollapsibleSection({
@@ -43,6 +44,7 @@ export default function PlanManageRun() {
   const [runId, setRunId] = useState<string | null>(null);
   const [detail, setDetail] = useState<RunDetail | null>(null);
   const [busy, setBusy] = useState(false);
+  const [gateStatus, setGateStatus] = useState<string | null>(null);
 
   // PV/TS
   const [vs, setVS] = useState<VisionSolution | null>(null);
@@ -91,6 +93,7 @@ export default function PlanManageRun() {
   useEffect(() => {
     if (!runId) {
       setDetail(null);
+      setGateStatus(null);
       clearEditors();
       return;
     }
@@ -98,6 +101,12 @@ export default function PlanManageRun() {
     (async () => {
       const d = await getRun(runId);
       setDetail(d);
+       // try to read from run detail if present, then ensure with /gate
+      setGateStatus(d?.manifest?.data?.vision_solution_status ?? null);
+      try {
+        const g = await getGateStatus(runId);
+        setGateStatus(g.vision_solution_status ?? null);
+      } catch { /* ignore */ }
       await loadVS(runId);
     })().finally(() => setBusy(false));
   }, [runId]);
@@ -172,6 +181,55 @@ export default function PlanManageRun() {
     }
   }
 
+  async function onCommitMemory() {
+  if (!runId || !detail) return;
+  const reqText = detail.requirement
+    ? `${detail.requirement.title}\n\n${detail.requirement.description}`.trim()
+    : "";
+  const pvText = [
+    goals.length ? `Goals:\n- ${goals.join("\n- ")}` : "",
+    personas.length ? `Personas:\n- ${personas.join("\n- ")}` : "",
+    features.length ? `Features:\n- ${features.join("\n- ")}` : "",
+  ].filter(Boolean).join("\n\n");
+
+  const ifs = Object.entries(interfaces||{}).map(([k,v])=>`- ${k}: ${v}`).join("\n");
+  const tsText = [
+    stack.length ? `Stack:\n- ${stack.join("\n- ")}` : "",
+    modules.length ? `Modules:\n- ${modules.join("\n- ")}` : "",
+    ifs ? `Interfaces:\n${ifs}` : "",
+    decisions.length ? `Decisions:\n- ${decisions.join("\n- ")}` : "",
+  ].filter(Boolean).join("\n\n");
+
+  const artifacts = [];
+  if (reqText) artifacts.push({ type: "requirement" as const, title: detail.requirement?.title, text: reqText });
+  if (pvText) artifacts.push({ type: "product_vision" as const, title: "Product Vision", text: pvText });
+  if (tsText) artifacts.push({ type: "technical_solution" as const, title: "Technical Solution", text: tsText });
+
+  if (!artifacts.length) { setVsMsg("Nothing to commit."); return; }
+  try {
+    await commitMemory({ run_id: runId, artifacts });
+    setVsMsg("Committed to memory.");
+  } catch (e:any) {
+    setVsMsg(/RAG_MODE=off/i.test(String(e?.message)) ? "Memory is disabled." : `Commit failed: ${e?.message ?? e}`);
+  }
+}
+
+  const isApproved = gateStatus === "approved";
+
+  async function onToggleApprove() {
+    if (!runId) return;
+    const next = isApproved ? "draft" : "approved";
+    try {
+      await updateGateStatus(runId, next);
+      setGateStatus(next); // reflect immediately
+      // optional: refresh run detail in background
+      getRun(runId).then(setDetail).catch(() => {});
+      setVsMsg(next === "approved" ? "Marked as Approved." : "Marked as Draft.");
+    } catch (e:any) {
+      setVsMsg(`Gate update failed: ${e?.message ?? e}`);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-semibold">Manage Run</h1>
@@ -179,9 +237,9 @@ export default function PlanManageRun() {
       {/* Toolbar: picker + actions */}
       <div className="flex flex-wrap items-center gap-3">
         <RunPicker value={runId} onChange={setRunId} />
-        {detail && (
-          <Badge tone={detail?.manifest?.data?.vision_solution_status === "approved" ? "emerald" : "amber"}>
-            Gate: {detail?.manifest?.data?.vision_solution_status ?? "—"}
+        {runId && (
+          <Badge tone={gateStatus === "approved" ? "emerald" : "amber"}>
+            Gate: {gateStatus ?? "—"}
           </Badge>
         )}
         <LoadingButton
@@ -210,6 +268,23 @@ export default function PlanManageRun() {
         </LoadingButton>
         {busy && <span className="text-sm opacity-60">Loading…</span>}
         {vsMsg && <span className="text-sm opacity-80">{vsMsg}</span>}
+        <button
+          className={`px-3 py-2 rounded-md ${isApproved ? "bg-slate-700 hover:bg-slate-600" : "bg-emerald-700 hover:bg-emerald-600"}`}
+          disabled={!runId}
+          onClick={onToggleApprove}
+        >
+          {isApproved ? "Mark Draft" : "Approve"}
+        </button>
+
+        {isApproved && (
+           <button
+             className="px-3 py-2 rounded-md bg-fuchsia-600 hover:bg-fuchsia-500"
+             disabled={!runId}
+             onClick={onCommitMemory}
+           >
+             Commit to Memory
+           </button>
+         )}
       </div>
 
       {runId && detail ? (

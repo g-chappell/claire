@@ -13,7 +13,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 # Settings + new Runs API
+from app.core.memory import get_memory_store
 from app.configs.settings import get_settings
+from app.api.memory import router as memory_router
 from app.api.runs import router as runs_router
 from app.api.plan import router as plan_router
 from app.api.runs_qol import router as runs_qol_router
@@ -38,6 +40,14 @@ def _compute_allowed_origins() -> List[str]:
     ]
 
 app = FastAPI(title=settings.APP_NAME)
+
+@app.on_event("startup")
+async def _startup() -> None:
+    app.state.memory = get_memory_store(
+        path=settings.RAG_STORE_PATH,
+        collection=settings.RAG_COLLECTION,
+        mode=settings.RAG_MODE,
+    )
 
 # ----- CORS -----
 ALLOWED_ORIGINS = _compute_allowed_origins()
@@ -95,3 +105,4 @@ async def chat(req: ChatRequest):
 app.include_router(runs_router)
 app.include_router(plan_router)
 app.include_router(runs_qol_router)
+app.include_router(memory_router)

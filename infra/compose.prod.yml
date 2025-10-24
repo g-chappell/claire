@@ -43,6 +43,7 @@ services:
       - RAG_STORE_PATH=/data/vector
       - LOG_FILE=/data/logs/llm_responses.log
       - DATABASE_URL=sqlite:////data/app.db
+      - ANONYMIZED_TELEMETRY=FALSE
     volumes:
       - backend_data:/data
       - rag_data:/data/vector

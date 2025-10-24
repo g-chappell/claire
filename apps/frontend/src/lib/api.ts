@@ -134,3 +134,35 @@ export function finalisePlan(
   );
 }
 
+export async function commitMemory(payload: {
+  run_id: string;
+  artifacts: {
+    type: "requirement" | "product_vision" | "technical_solution";
+    title?: string;
+    text: string;
+  }[];
+}) {
+  const res = await fetch(`${import.meta.env.VITE_API_URL}/memory/ingest`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function updateGateStatus(runId: string, status: "approved"|"draft"|"rejected") {
+  const res = await fetch(`${import.meta.env.VITE_API_URL}/runs/${runId}/gate`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ vision_solution_status: status }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<{ run_id: string; vision_solution_status: string }>;
+}
+
+export async function getGateStatus(runId: string) {
+  const res = await fetch(`${import.meta.env.VITE_API_URL}/runs/${runId}/gate`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<{ run_id: string; vision_solution_status: string | null }>;
+}

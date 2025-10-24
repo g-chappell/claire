@@ -30,6 +30,15 @@ class _Common:
     @property
     def DB_DSN(self) -> str:
         return self.DATABASE_URL
+    
+    # RAG memory
+
+    # RAG memory (skeleton only)
+    RAG_MODE: str = "off"           # off | manual | auto_approved
+    RAG_STORE_PATH: str = "./data/vector"
+    RAG_COLLECTION: str = "claire-dev"
+    RAG_TOP_K: int = 6
+    USE_RAG: bool = False
 
 
 if V2:
