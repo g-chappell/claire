@@ -3,10 +3,12 @@ import os
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.configs.settings import get_settings
+from app.core.rag_context import build_rag_context
 from app.core.models import PlanBundle, ProductVision, TechnicalSolution
 from app.storage.db import get_db
 from app.core.planner import (
@@ -15,7 +17,7 @@ from app.core.planner import (
     generate_vision_solution,
     finalise_plan,
 )
-from app.storage.models import ProductVisionORM, TechnicalSolutionORM, RunManifestORM
+from app.storage.models import ProductVisionORM, TechnicalSolutionORM, RunManifestORM, RequirementORM
 
 
 logger = logging.getLogger(__name__)
@@ -85,13 +87,28 @@ def _set_gate_status(db: Session, run_id: str, status: str) -> None:
 # ---------- NEW: Stage 1 — generate/read/update PV/TS ----------
 
 @router.post("/runs/{run_id}/plan/vision-solution", response_model=VisionSolutionOut)
-def post_vision_solution(run_id: str, db: Session = Depends(get_db)):
+def post_vision_solution(run_id: str,request: Request, use_rag: bool | None = Query(default=None), db: Session = Depends(get_db), settings = Depends(get_settings),):
     """
     Generate *only* the Product Vision & Technical Solution for this run,
     persist them, and return them. Does not create epics/stories yet.
     """
     try:
-        pv, ts = generate_vision_solution(db, run_id)
+        # --- Optional RAG context (feature-flagged) ---
+        rag_context = ""
+        enabled = use_rag if use_rag is not None else settings.USE_RAG
+        if enabled:
+            # Grab the run's requirement to form the retrieval query
+            req = db.query(RequirementORM).filter_by(run_id=run_id).first()
+            if req:
+                ctx_text, _hits = build_rag_context(
+                    request,
+                    requirement_title=req.title,
+                    requirement_description=req.description,
+                    types=("product_vision", "technical_solution"),
+                    top_k=settings.RAG_TOP_K,
+                )
+                rag_context = ctx_text
+        pv, ts = generate_vision_solution(db, run_id, rag_context=rag_context)
         # Mark gate as "draft" until user approves/finalises
         _set_gate_status(db, run_id, "draft")
         return {"product_vision": pv, "technical_solution": ts}

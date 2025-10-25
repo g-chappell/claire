@@ -37,7 +37,7 @@ def _persist_vision_solution(db: Session, run_id: str,
 
 
 # --- NEW: stage 1 - generate PV/TS only ---
-def generate_vision_solution(db: Session, run_id: str) -> tuple[ProductVision, TechnicalSolution]:
+def generate_vision_solution(db: Session, run_id: str, rag_context: str | None = None,) -> tuple[ProductVision, TechnicalSolution]:
     """Run Vision + Architecture chains and persist only those results."""
     req: RequirementORM | None = (
         db.query(RequirementORM)
@@ -47,11 +47,18 @@ def generate_vision_solution(db: Session, run_id: str) -> tuple[ProductVision, T
     )
     if not req:
         raise ValueError("requirement not found for run")
+    
+    # If RAG is enabled upstream, inject context into the description so
+    # downstream prompt builders can reuse it without any other changes.
+    combined_desc = req.description or ""
+    if rag_context:
+        combined_desc = (
+        combined_desc.rstrip() + "\n\nYou may reuse relevant items from prior approved artefacts:\n" + rag_context + "\n\nIf irrelevant, ignore them.")
 
     p_req = Requirement(
         id=req.id,
         title=req.title,
-        description=req.description,
+        description=combined_desc,
         constraints=req.constraints or [],
         priority=_coerce_priority(getattr(req, "priority", None)),
         non_functionals=req.non_functionals or [],
