@@ -39,11 +39,17 @@ services:
     env_file:
       - ../../.env                                    # server-side backend env (prod)
     environment:
-      - FRONTEND_ORIGIN=https://app.blacksail.dev
+      - RAG_MODE=manual
       - RAG_STORE_PATH=/data/vector
+      - RAG_COLLECTION=claire-prod
+      - RAG_TOP_K=6
+      - USE_RAG=false          # leave off by default
+      - ANONYMIZED_TELEMETRY=FALSE
+      - TOKENIZERS_PARALLELISM=false
+      - ORT_LOG_SEVERITY_LEVEL=4
+      - FRONTEND_ORIGIN=https://app.blacksail.dev
       - LOG_FILE=/data/logs/llm_responses.log
       - DATABASE_URL=sqlite:////data/app.db
-      - ANONYMIZED_TELEMETRY=FALSE
     volumes:
       - backend_data:/data
       - rag_data:/data/vector
