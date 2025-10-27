@@ -96,6 +96,9 @@ def post_vision_solution(run_id: str,request: Request, use_rag: bool | None = Qu
         # --- Optional RAG context (feature-flagged) ---
         rag_context = ""
         enabled = use_rag if use_rag is not None else settings.USE_RAG
+        store_cls = type(request.app.state.memory).__name__
+        logger.info("RAG: enabled=%s (env=%s param=%s) store=%s",
+                    enabled, settings.USE_RAG, use_rag, store_cls)
         if enabled:
             # Grab the run's requirement to form the retrieval query
             req = db.query(RequirementORM).filter_by(run_id=run_id).first()
@@ -107,6 +110,8 @@ def post_vision_solution(run_id: str,request: Request, use_rag: bool | None = Qu
                     types=("product_vision", "technical_solution"),
                     top_k=settings.RAG_TOP_K,
                 )
+                logger.info("RAG: build_rag_context -> %d hits, ctx_len=%d",
+                len(_hits), len(ctx_text))
                 rag_context = ctx_text
         pv, ts = generate_vision_solution(db, run_id, rag_context=rag_context)
         # Mark gate as "draft" until user approves/finalises

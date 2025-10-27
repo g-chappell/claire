@@ -20,6 +20,8 @@ from app.api.runs import router as runs_router
 from app.api.plan import router as plan_router
 from app.api.runs_qol import router as runs_qol_router
 
+import logging
+
 settings = get_settings()
 
 # ----- CORS helpers -----
@@ -38,6 +40,9 @@ def _compute_allowed_origins() -> List[str]:
         "http://localhost:3000",
         "http://127.0.0.1:3000",
     ]
+
+if not logging.getLogger().hasHandlers():
+    logging.basicConfig(level=logging.INFO)
 
 app = FastAPI(title=settings.APP_NAME)
 

@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional, Protocol, Sequence, Mapping, cast,
 
 if TYPE_CHECKING:
     # Only for the type checker; no runtime import
-    from chromadb.api.types import IDs, Documents, Embeddings, Metadatas, Metadata
+    from chromadb.api.types import IDs, Documents, Embeddings, Metadatas, Metadata, Include
 
 @dataclass
 class MemoryDoc:
@@ -16,7 +16,13 @@ class MemoryDoc:
 class MemoryStore(Protocol):
     """Interface for vector memory."""
     def add(self, docs: List[MemoryDoc]) -> None: ...
-    def search(self, query: str, top_k: int = 6, where: Optional[Dict] = None) -> List[MemoryDoc]: ...
+    def search(
+        self,
+        query: str,
+        top_k: int = 6,
+        where: Optional[Dict] = None,
+        min_similarity: Optional[float] = None,
+        ) -> List[MemoryDoc]: ...
     def purge(self) -> None: ...
 
 class NoOpMemoryStore:
@@ -28,7 +34,7 @@ class NoOpMemoryStore:
         # no-op
         return
 
-    def search(self, query: str, top_k: int = 6, where: Optional[Dict] = None) -> List[MemoryDoc]:
+    def search(self, query: str, top_k: int = 6, where: Optional[Dict] = None, min_similarity: Optional[float] = None) -> List[MemoryDoc]:
         # no results in skeleton mode
         return []
 
@@ -50,7 +56,8 @@ class ChromaMemoryStore:
             settings=Settings(anonymized_telemetry=False),
         )
         from sentence_transformers import SentenceTransformer  # type: ignore
-        self._col = self._client.get_or_create_collection(name=collection)
+        self._collection_name = collection
+        self._col = self._client.get_or_create_collection(name=self._collection_name)
         self._embedder = SentenceTransformer(embed_model)
 
     def _embed(self, texts: List[str]) -> List[List[float]]:
@@ -79,19 +86,37 @@ class ChromaMemoryStore:
 
         self._col.add(ids=ids_t, documents=docs_t, metadatas=metas_t, embeddings=embeds_t)
 
-    def search(self, query: str, top_k: int = 6, where: Optional[Dict] = None) -> List[MemoryDoc]:
+    def search(
+        self,
+        query: str,
+        top_k: int = 6,
+        where: Optional[Dict] = None,
+        min_similarity: Optional[float] = None,
+    ) -> List[MemoryDoc]:
         q_emb = self._embed([query])[0]
-        res = self._col.query(query_embeddings=[q_emb], n_results=top_k, where=where or {})
+        include_t: "Include" = cast("Include", ["documents", "metadatas", "distances"])
+        res = self._col.query(
+            query_embeddings=[q_emb],
+            n_results=top_k,
+            where=where or {},
+            include=include_t,
+        )
         out: List[MemoryDoc] = []
         ids = res.get("ids") or []
         docs = res.get("documents") or []
         metas = res.get("metadatas") or []
+        dists = res.get("distances") or []
         if not ids or not ids[0]:
             return out
         ids0  = cast(List[str], ids[0])
         docs0 = cast(List[str], docs[0]) if docs else []
         metas0 = cast(List[Mapping[str, Any]], metas[0]) if metas else []
+        dists0 = cast(List[float], dists[0]) if dists else []
         for i, _id in enumerate(ids0):
+            # Convert distance -> similarity (cosine metric): sim = 1 - dist
+            sim = 1.0 - (dists0[i] if i < len(dists0) else 1.0)
+            if min_similarity is not None and sim < min_similarity:
+                continue
             meta_dict: Dict[str, str] = {str(k): str(v) for k, v in (metas0[i] if i < len(metas0) else {}).items()}
             out.append(MemoryDoc(
                 id=_id,
@@ -101,7 +126,23 @@ class ChromaMemoryStore:
         return out
 
     def purge(self) -> None:
-        self._col.delete(where={})  # wipe all
+        # Preferred: drop and recreate the collection
+        try:
+            self._client.delete_collection(self._collection_name)
+        except Exception:
+            # Fallback: delete by IDs if delete_collection isn't available
+            try:
+                got = self._col.get(limit=100000, include=[])  # ids only
+                ids = got.get("ids") or []
+                # Some versions return nested lists; flatten if needed
+                if ids and isinstance(ids[0], list):
+                    ids = ids[0]
+                if ids:
+                    self._col.delete(ids=ids)
+            except Exception:
+                pass
+        # Recreate a fresh, empty collection
+        self._col = self._client.get_or_create_collection(name=self._collection_name)
 
 def get_memory_store(path: str = "./data/vector", collection: str = "claire-dev", mode: str = "off"):
     # Off -> NoOp; any other mode -> real store

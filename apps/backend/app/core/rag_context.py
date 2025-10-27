@@ -35,17 +35,28 @@ def build_rag_context(
 
     query = f"{requirement_title}\n\n{requirement_description}".strip()
     where = {"type": {"$in": list(types)}}
-    hits = store.search(query=query, top_k=top_k or settings.RAG_TOP_K, where=where or {})
+    fetch_k = (top_k or settings.RAG_TOP_K) * max(1, settings.RAG_OVERFETCH)
+    hits = store.search(
+        query=query,
+        top_k=fetch_k,
+        where=where or {},
+        min_similarity=settings.RAG_MIN_SIMILARITY,
+    )
 
     logger.info("RAG: %s hits for query", len(hits))
+    for h in hits[:5]:
+        label = h.meta.get("req_title") or h.meta.get("title") or ""
+        logger.info("RAG hit: [%s] %s", h.meta.get("type"), label)
+
     if not hits:
         return "", []
 
     lines: List[str] = []
     total = 0
     for h in hits:
-        t = (getattr(h, "meta", {}) or {}).get("type", "artifact")
-        title = ((getattr(h, "meta", {}) or {}).get("title") or "").strip()
+        meta = (getattr(h, "meta", {}) or {})
+        t = meta.get("type", "artifact")
+        title = (meta.get("req_title") or meta.get("title") or "").strip()
         head = f"[{t}] {title}".strip()
         snippet = _trim(getattr(h, "text", "").strip(), MAX_SNIPPET_CHARS)
         candidate = f"- {head}: {snippet}"
