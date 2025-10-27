@@ -39,7 +39,8 @@ class _Common:
     RAG_COLLECTION: str = "claire-dev"
     RAG_TOP_K: int = 6
     USE_RAG: bool = False
-
+    RAG_MIN_SIMILARITY: float = 0.35
+    RAG_OVERFETCH: int = 2
 
 if V2:
     # Pydantic v2 settings
