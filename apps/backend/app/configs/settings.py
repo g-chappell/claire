@@ -42,6 +42,18 @@ class _Common:
     RAG_MIN_SIMILARITY: float = 0.35
     RAG_OVERFETCH: int = 2
 
+    # Serena / MCP
+    SERENA_TRANSPORT: str = "stdio"    # "stdio" | "streamable_http" | "sse"
+    SERENA_COMMAND: str = "uvx"        # requires uv installed on host
+    SERENA_ARGS: list[str] = [
+        "--from", "git+https://github.com/oraios/serena",
+        "serena", "start-mcp-server",
+        "--context", "ide-assistant",
+    ]
+    SERENA_PROJECT_DIR: str = "."      # fallback only
+    CODE_WORKSPACES_ROOT: str = "./data/code"  # default; override via env
+
+
 if V2:
     # Pydantic v2 settings
     class SettingsV2(_Common, V2BaseSettings):  # type: ignore[misc]

@@ -26,6 +26,7 @@ jsonschema-specifications==2025.4.1
 jsonschema==4.24.0
 langchain-anthropic>=0.1.0
 langchain-core==0.3.66
+langchain-mcp-adapters>=0.0.16
 langchain-openai==0.3.24
 langchain-text-splitters==0.3.8
 langchain==0.3.26
