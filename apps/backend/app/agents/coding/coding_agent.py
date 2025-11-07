@@ -1,12 +1,21 @@
 # apps/backend/app/agents/coding/coding_agent.py
 from __future__ import annotations
-from typing import Optional, Sequence, cast, Any
+from typing import Optional, Sequence, cast, Any, List, Dict, Sequence, Annotated, TypedDict, Union
 from fastapi import Request
-from langchain.agents import create_tool_calling_agent, AgentExecutor
-from langchain_core.messages import HumanMessage
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+
+from langchain.chat_models import init_chat_model
+from langchain.agents import create_agent
+from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 from langchain_core.tools import BaseTool
-from langchain_anthropic import ChatAnthropic  # you already use Anthropic
+from langgraph.graph.message import add_messages, AnyMessage
+
+# StreamEvent import location in v1:
+try:
+    from langchain_core.runnables import StreamEvent
+except Exception:
+    # fallback for envs where it's surfaced from .graph
+    from langchain_core.runnables.graph import StreamEvent  # type: ignore
+
 from app.configs.settings import get_settings
 from app.agents.coding.serena_tools import get_serena_tools, close_serena
 
@@ -22,24 +31,21 @@ Rules:
 - Keep diffs minimal and idempotent; re-run tests when available.
 """
 
+JsonMessage = Dict[str, Any]
+MessagesInput = List[Union[AnyMessage, JsonMessage]]
+
+class AgentInputState(TypedDict):
+    messages: Annotated[MessagesInput, add_messages]
+
+
 class CodingAgent:
     def __init__(self, model: Optional[str] = None, temperature: float = 0.0):
         settings = get_settings()
-        Anthropic = cast(Any, ChatAnthropic)
-        try:
-            # Older sig: model_name + (timeout, stop) expected by the stub
-            self.llm = Anthropic(
-                model_name=(model or settings.LLM_MODEL),
-                temperature=temperature,
-                timeout=None,
-                stop=None,
-            )
-        except TypeError:
-            # Newer sig: model=... (timeout/stop optional)
-            self.llm = Anthropic(
-                model=(model or settings.LLM_MODEL),
-                temperature=temperature,
-            )
+        self.llm = init_chat_model(
+            model=(model or settings.LLM_MODEL),
+            model_provider="anthropic",
+            temperature=temperature,
+        )
 
     async def for_request(self, request: Request, project_dir: Optional[str] = None):
         tools = await get_serena_tools(request, project_dir=project_dir)
@@ -47,29 +53,25 @@ class CodingAgent:
             raise RuntimeError("Serena MCP connected but exposed 0 tools.")
         tools_seq: Sequence[BaseTool] = cast(Sequence[BaseTool], tools)
 
-        # Build a proper prompt template
-        prompt = ChatPromptTemplate.from_messages(
-            [
-                ("system", SYSTEM_PROMPT),
-                MessagesPlaceholder("messages"),          # your user/task content
-                MessagesPlaceholder("agent_scratchpad"),  # required by LC agent
-            ]
-        )
-
-        agent = create_tool_calling_agent(self.llm, tools_seq, prompt=prompt)
-        executor = AgentExecutor(
-            agent=agent,
+        # v1: returns a runnable graph directly (no .compile())
+        agent = create_agent(
+            model=self.llm,
             tools=tools_seq,
-            verbose=True,
-            return_intermediate_steps=True,
-            handle_parsing_errors=True,
+            system_prompt=SYSTEM_PROMPT,
+            name="SerenaCoder",
         )
-        return executor
+        return agent
 
-    async def implement_story(self, request: Request, story_title: str, story_desc: str, project_dir: Optional[str] = None) -> dict:
-        executor = await self.for_request(request, project_dir=project_dir)
-        # SYSTEM_PROMPT is in the prompt; send the user task as `messages`
-        messages = [
+    async def implement_story(
+        self,
+        request: Request,
+        story_title: str,
+        story_desc: str,
+        project_dir: Optional[str] = None,
+    ) -> dict:
+        agent = await self.for_request(request, project_dir=project_dir)
+
+        messages: MessagesInput = [
             HumanMessage(
                 content=(
                     f"Story: {story_title}\n\n"
@@ -78,12 +80,35 @@ class CodingAgent:
                 )
             )
         ]
+
+        # ✔ Type the event list correctly
+        intermediate_events: List[StreamEvent] = []
+
+        # ✔ Provide a properly-typed state for the agent
+        state: AgentInputState = {"messages": messages}
+
         try:
-            res = await executor.ainvoke({"messages": messages})
+            # Stream events (tool calls, model tokens, etc.)
+            async for ev in agent.astream_events(state):
+                intermediate_events.append(ev)
+
+            # Final result
+            final = await agent.ainvoke(state)
+
+            # Extract a useful output string
+            output_text: Optional[str] = None
+            msgs = final.get("messages") if isinstance(final, dict) else None
+            if isinstance(msgs, list) and msgs:
+                for m in reversed(msgs):
+                    if getattr(m, "type", None) == "ai" or m.__class__.__name__ == "AIMessage":
+                        output_text = getattr(m, "content", None)
+                        break
+            if output_text is None:
+                output_text = str(final)
+
             return {
-                "output": res.get("output"),
-                "intermediate_steps": res.get("intermediate_steps", []),
+                "output": output_text,
+                "intermediate_steps": intermediate_events,  # List[StreamEvent]
             }
         finally:
-            # ensure the stdio/SSE transport is torn down even on errors
             await close_serena(request)
