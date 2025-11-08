@@ -1,20 +1,13 @@
 # apps/backend/app/agents/coding/coding_agent.py
 from __future__ import annotations
-from typing import Optional, Sequence, cast, Any, List, Dict, Sequence, Annotated, TypedDict, Union
+from typing import Optional, Sequence, cast, Any, List, Dict, Annotated, TypedDict, Union
 from fastapi import Request
 
 from langchain.chat_models import init_chat_model
 from langchain.agents import create_agent
-from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
+from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.tools import BaseTool
 from langgraph.graph.message import add_messages, AnyMessage
-
-# StreamEvent import location in v1:
-try:
-    from langchain_core.runnables import StreamEvent
-except Exception:
-    # fallback for envs where it's surfaced from .graph
-    from langchain_core.runnables.graph import StreamEvent  # type: ignore
 
 from app.configs.settings import get_settings
 from app.agents.coding.serena_tools import get_serena_tools, close_serena
@@ -31,10 +24,12 @@ Rules:
 - Keep diffs minimal and idempotent; re-run tests when available.
 """
 
+# Allow both LC message objects and dict-like messages (what the v1 stubs accept)
 JsonMessage = Dict[str, Any]
 MessagesInput = List[Union[AnyMessage, JsonMessage]]
 
 class AgentInputState(TypedDict):
+    # "messages" uses the add_messages reducer in LangGraph
     messages: Annotated[MessagesInput, add_messages]
 
 
@@ -82,18 +77,18 @@ class CodingAgent:
         ]
 
         # ✔ Type the event list correctly
-        intermediate_events: List[StreamEvent] = []
+        intermediate_events: List[Dict[str, Any]] = []
 
         # ✔ Provide a properly-typed state for the agent
         state: AgentInputState = {"messages": messages}
 
         try:
             # Stream events (tool calls, model tokens, etc.)
-            async for ev in agent.astream_events(state):
-                intermediate_events.append(ev)
+            async for ev in agent.astream_events(cast(Any, state)):
+                intermediate_events.append(cast(Dict[str, Any], ev))
 
             # Final result
-            final = await agent.ainvoke(state)
+            final = await agent.ainvoke(cast(Any, state))
 
             # Extract a useful output string
             output_text: Optional[str] = None
@@ -107,8 +102,8 @@ class CodingAgent:
                 output_text = str(final)
 
             return {
-                "output": output_text,
-                "intermediate_steps": intermediate_events,  # List[StreamEvent]
-            }
+                    "output": output_text,
+                    "intermediate_steps": intermediate_events,  # List[StreamEvent]
+                }
         finally:
             await close_serena(request)

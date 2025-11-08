@@ -10,6 +10,7 @@ import json, os, subprocess
 from app.configs.settings import get_settings
 import traceback
 from fastapi.responses import JSONResponse
+from fastapi.encoders import jsonable_encoder
 from app.agents.coding.serena_tools import get_serena_tools, close_serena
 from pathlib import Path
 
@@ -21,12 +22,12 @@ def _err(e: Exception) -> JSONResponse:
     )
 
 def _workspace_root() -> Path:
-    # Root folder where per-run workspaces live
-    return Path(get_settings().SERENA_PROJECT_DIR).resolve()
-
-def _project_dir_for_run(run_id: str) -> str:
-    # Pure path calculation; no I/O
-    return str(_workspace_root() / run_id)
+    """
+    Root folder where per-run workspaces live.
+    Align with _ensure_workspace (CODE_WORKSPACES_ROOT).
+    """
+    root = os.path.abspath(getattr(get_settings(), "CODE_WORKSPACES_ROOT", "./data/code"))
+    return Path(root).resolve()
 
 def _ensure_workspace(run_id: str) -> str:
     """Create a per-run workspace folder and init git on first use."""
@@ -103,15 +104,17 @@ async def implement_single_story(run_id: str, story_id: str, request: Request, d
     story = db.query(StoryORM).filter(StoryORM.run_id == run_id, StoryORM.id == story_id).first()
     if not story:
         raise HTTPException(status_code=404, detail="story not found")
+
     project_dir = _ensure_workspace(run_id)
     agent = CodingAgent()
+
     acc = _get_acceptance_text(db, run_id, story_id)
     desc = acc or _as_text(story.description)
+
     try:
-        out = await agent.implement_story(
-            request, story.title, desc, project_dir=project_dir
-        )
-        return {"run_id": run_id, "story_id": story_id, **out}
+        out = await agent.implement_story(request, story.title, desc, project_dir=project_dir)
+        # ensure intermediate_steps (events) and any message objects become JSON-serializable
+        return jsonable_encoder({"run_id": run_id, "story_id": story_id, **out})
     except HTTPException:
         raise
     except Exception as e:
@@ -126,16 +129,14 @@ async def implement_all_stories(run_id: str, request: Request, db: Session = Dep
     stories = _get_stories(db, run_id)
     project_dir = _ensure_workspace(run_id)
     agent = CodingAgent()
-    
-    results = []
+
+    results: List[dict] = []
     for s in stories:
         acc = _get_acceptance_text(db, run_id, s.id)
         desc = acc or _as_text(s.description)
         try:
-            out = await agent.implement_story(
-                request, s.title, desc, project_dir=project_dir
-            )
-            results.append({"story_id": s.id, "title": s.title, **out})
+            out = await agent.implement_story(request, s.title, desc, project_dir=project_dir)
+            results.append(jsonable_encoder({"story_id": s.id, "title": s.title, **out}))
         except HTTPException:
             raise
         except Exception as e:
@@ -146,7 +147,7 @@ async def implement_all_stories(run_id: str, request: Request, db: Session = Dep
                 "trace": traceback.format_exc(),
             })
 
-    return {"run_id": run_id, "results": results}
+    return jsonable_encoder({"run_id": run_id, "results": results})
 
 @router.get("/runs/{run_id}/tools")
 async def list_serena_tools(run_id: str, request: Request):
@@ -154,7 +155,7 @@ async def list_serena_tools(run_id: str, request: Request):
     project_dir = _ensure_workspace(run_id)
     try:
         tools = await get_serena_tools(request, project_dir=project_dir)
-        return {"count": len(tools), "tools": [t.name for t in tools]}
+        return jsonable_encoder({"count": len(tools), "tools": [t.name for t in tools]})
     finally:
         # Make sure the MCP session is torn down here (we only needed it to list)
         try:

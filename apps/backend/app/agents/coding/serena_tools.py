@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 import asyncio
-from typing import Any, Dict, Optional, cast
+from typing import Any, Dict, Optional, List, Sequence, Callable, cast
 from fastapi import Request
 
 from langchain_mcp_adapters.client import MultiServerMCPClient
@@ -14,10 +14,8 @@ from pydantic import BaseModel, Field
 # MCP exceptions
 from mcp.shared.exceptions import McpError
 try:
-    # Newer MCP exports this; use when available
     from mcp.client.stdio import EndOfStream  # type: ignore
 except Exception:
-    # Fallback for older MCP builds
     class EndOfStream(Exception):
         ...
 
@@ -25,14 +23,11 @@ from app.configs.settings import get_settings
 
 
 def _default_serena_args() -> list[str]:
-    """
-    Default args for start-mcp-server. We run:
-        start-mcp-server serena --project <dir> [--context <ctx>]
-    """
+    """Default args for start-mcp-server: start-mcp-server serena --project <dir> [--context <ctx>]"""
     return ["serena"]
 
 
-async def get_serena_tools(request: Request, project_dir: Optional[str] = None):
+async def get_serena_tools(request: Request, project_dir: Optional[str] = None) -> List[BaseTool]:
     """
     Start a Serena MCP server (stdio by default) scoped to `project_dir`
     and return its tools as LangChain tools.
@@ -47,7 +42,6 @@ async def get_serena_tools(request: Request, project_dir: Optional[str] = None):
     args = getattr(settings, "SERENA_ARGS", None) or _default_serena_args()
 
     # Use an existing Serena context that exposes read/write tools.
-    # "agent" is widely available; "ide-assistant" is another option.
     ctx = (getattr(settings, "SERENA_CONTEXT", None) or os.getenv("SERENA_CONTEXT", "agent")).strip()
 
     cmd = [command, *args, "--project", project]
@@ -59,7 +53,6 @@ async def get_serena_tools(request: Request, project_dir: Optional[str] = None):
 
     servers: Dict[str, Dict[str, Any]] = {}
     if transport == "stdio":
-        # Spawn Serena as a child process
         servers["serena"] = {
             "transport": "stdio",
             "command": cmd[0],
@@ -84,15 +77,13 @@ async def get_serena_tools(request: Request, project_dir: Optional[str] = None):
     for attempt in range(5):
         try:
             cm = client.session("serena")
-            session = await cm.__aenter__()  # <- DO NOT close here
+            session = await cm.__aenter__()  # <- keep open until close_serena()
             # store an aexit closer on the request to clean up later
-            closers = getattr(request.state, "_serena_close", None)
-            if closers is None:
-                closers = []
-                request.state._serena_close = closers
+            closers: List[Callable[..., Any]] = getattr(request.state, "_serena_close", None) or []
+            request.state._serena_close = closers
             closers.append(cm.__aexit__)
 
-            tools = await load_mcp_tools(session)
+            tools: List[BaseTool] = list(await load_mcp_tools(session))
 
             # --- Patch: make create_text_file tolerant of missing `content` ---
             orig_create = next((t for t in tools if t.name == "create_text_file"), None)
@@ -127,28 +118,32 @@ async def get_serena_tools(request: Request, project_dir: Optional[str] = None):
                         "relative_path": relative_path,
                         "content": (content if content and content.strip() != "" else _stub_for(relative_path)),
                     }
-                    # Prefer new-style .ainvoke (LC 0.2+); fall back to .arun if needed.
-                    ainvoke = getattr(orig_create_tool, "ainvoke", None)
-                    if ainvoke is not None:
-                        return await ainvoke(payload)  # type: ignore[misc]
-                    return await orig_create_tool.arun(payload)  # type: ignore[attr-defined]
+                    # Prefer v1-style ainvoke -> arun -> invoke/run as last resorts
+                    if hasattr(orig_create_tool, "ainvoke"):
+                        return await getattr(orig_create_tool, "ainvoke")(payload)  # type: ignore[call-arg]
+                    if hasattr(orig_create_tool, "arun"):
+                        return await getattr(orig_create_tool, "arun")(payload)     # type: ignore[call-arg]
+                    if hasattr(orig_create_tool, "invoke"):
+                        return getattr(orig_create_tool, "invoke")(payload)        # type: ignore[call-arg]
+                    if hasattr(orig_create_tool, "run"):
+                        return getattr(orig_create_tool, "run")(payload)           # type: ignore[call-arg]
+                    raise RuntimeError("create_text_file tool has no callable interface")
 
                 tools.append(
                     StructuredTool.from_function(
+                        func=_create_text_file_safe,
                         name="create_text_file",
                         description="Create a new text file. If 'content' is omitted, writes a minimal, valid stub.",
-                        coroutine=_create_text_file_safe,
                         args_schema=_CreateArgs,
                     )
                 )
-            # --- End patch ---    
+            # --- End patch ---
 
             if tools:
                 return tools
             last_err = RuntimeError("Serena session opened but returned 0 tools")
         except (McpError, EndOfStream, ConnectionError, RuntimeError) as e:
             last_err = e
-            # brief backoff
             await asyncio.sleep(0.8 * (attempt + 1))
 
     raise RuntimeError(
@@ -157,9 +152,10 @@ async def get_serena_tools(request: Request, project_dir: Optional[str] = None):
         f"Last error: {last_err}"
     )
 
+
 async def close_serena(request: Request) -> None:
     """Close any open Serena MCP sessions registered on this request."""
-    closers = getattr(request.state, "_serena_close", [])
+    closers: List[Callable[..., Any]] = getattr(request.state, "_serena_close", [])  # type: ignore[attr-defined]
     while closers:
         closer = closers.pop()
         try:
