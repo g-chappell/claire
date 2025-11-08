@@ -1,7 +1,8 @@
+# apps/backend/app/agents/planning/tech_writer_lc.py
+
 from __future__ import annotations
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
-from app.agents.lc.schemas import DesignNoteDraft, TechWritingBundleDraft, TaskDraft
+from app.agents.lc.schemas import TechWritingBundleDraft, TaskDraft
 
 # --- Design Notes ---
 
@@ -12,12 +13,12 @@ def make_notes_chain(llm):
     """
     prompt = ChatPromptTemplate.from_messages([
         ("system",
-        "You are a senior technical writer. Create concise design notes to guide implementation.\n"
-        "STRICT RULES:\n"
-        "- Output MUST be valid JSON for the Pydantic schema TechWritingBundleDraft(notes only).\n"
-        "- Fill `notes` with 2–5 items. Do NOT include tasks here.\n"
-        "- Each note MUST have: title, kind in {{overview,api,frontend,repo,quality,risk,other}}, body_md.\n"
-        "- Use related_epic_titles and related_story_titles to link by EXACT TITLES from the provided lists.\n"),
+         "You are a senior technical writer. Create concise design notes to guide implementation.\n"
+         "STRICT RULES:\n"
+         "- Output MUST be valid JSON for the Pydantic schema TechWritingBundleDraft (notes only).\n"
+         "- Fill `notes` with 2–5 items. Do NOT include tasks here.\n"
+         "- Each note MUST have: title, kind in {{overview,api,frontend,repo,quality,risk,other}}, body_md.\n"
+         "- Use related_epic_titles and related_story_titles to link by EXACT TITLES from the provided lists.\n"),
         ("human",
          "Context:\n"
          "- Features: {features}\n"
@@ -29,7 +30,7 @@ def make_notes_chain(llm):
          "- Stories: {story_titles}\n"
          "Return JSON ONLY."),
     ])
-    # Force the shape via structured output
+    # Force the structured shape via LC v1 structured output
     return prompt | llm.with_structured_output(TechWritingBundleDraft)
 
 # --- Per-story Tasks ---
@@ -37,7 +38,7 @@ def make_notes_chain(llm):
 def make_tasks_chain(llm):
     """
     Returns a chain that, given a single story input, emits TaskDraft for THAT story.
-    We will batch() over stories at the orchestrator.
+    Orchestrator can batch() over stories.
     """
     prompt = ChatPromptTemplate.from_messages([
         ("system",

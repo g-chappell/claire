@@ -1,3 +1,5 @@
+# apps/backend/app/agents/planning/requirements_analyst_lc.py
+
 from __future__ import annotations
 from langchain_core.prompts import ChatPromptTemplate
 from app.agents.lc.schemas import RAPlanDraft
@@ -26,6 +28,14 @@ Output constraints:
 """
 
 def make_chain(llm):
-    structured = llm.with_structured_output(RAPlanDraft)
-    prompt = ChatPromptTemplate.from_messages([("system", SYS), ("human", HUMAN)])
-    return prompt | structured
+    """Return a Runnable that maps {features, modules, interfaces, decisions} to RAPlanDraft."""
+    structured_llm = llm.with_structured_output(
+        RAPlanDraft,
+        method="json_schema",
+        strict=True,
+    )
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", SYS),
+        ("human", HUMAN),
+    ])
+    return prompt | structured_llm

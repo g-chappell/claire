@@ -1,3 +1,4 @@
+# apps/backend/agents/meta/product_manager_llm.py
 from __future__ import annotations
 
 import hashlib
@@ -5,7 +6,11 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, Type, TypeVar, ca
 
 from pydantic import BaseModel
 
-from langchain_core.runnables import RunnableConfig
+# RunnableConfig import path is stable in v1, but keep a small fallback for envs that differ
+try:
+    from langchain_core.runnables import RunnableConfig
+except Exception:  # pragma: no cover
+    from langchain_core.runnables.config import RunnableConfig  # type: ignore
 
 from app.agents.lc.model_factory import make_chat_model
 from app.agents.planning import vision_lc as VISION
@@ -47,32 +52,36 @@ def _gen_id(prefix: str, raw: str) -> str:
     return f"{prefix}_{hashlib.md5(raw.encode('utf-8')).hexdigest()[:10]}"
 
 
-def _try_invoke(chain, inp: Dict[str, Any]):
+def _try_invoke(chain, inp: Dict[str, Any], config: Optional[RunnableConfig] = None):
     """
-    Invoke a LangChain chain with a simple second-chance retry that hints schema repair.
+    Invoke a LangChain runnable with a simple second-chance retry that hints schema repair.
+    Compatible with LangChain v1: pass RunnableConfig via the `config` kwarg.
     """
     err: Optional[Exception] = None
     payload: Dict[str, Any] = dict(inp)
     for _ in range(RETRY_ATTEMPTS):
         try:
-            return chain.invoke(payload)
+            # v1 runnables accept `config=` directly
+            return chain.invoke(payload, config=config)
         except Exception as e:  # parsing/validation hiccup
             err = e
             payload = {
                 **payload,
-                "repair_hint": f"Previous output failed schema: {type(e).__name__}. "
-                "Return VALID JSON for the requested schema (no extra keys).",
+                "repair_hint": (
+                    f"Previous output failed schema: {type(e).__name__}. "
+                    "Return VALID JSON for the requested schema (no extra keys)."
+                ),
             }
     if err:
         raise err
 
 
-def _invoke_typed(expected_type: Type[T], chain, inp: Dict[str, Any]) -> T:
+def _invoke_typed(expected_type: Type[T], chain, inp: Dict[str, Any], config: Optional[RunnableConfig] = None) -> T:
     """
     Invoke the chain and normalize the result into the expected Pydantic model type.
-    This both satisfies Pylance and hardens runtime parsing.
+    This both satisfies type checkers and hardens runtime parsing.
     """
-    out: Any = _try_invoke(chain, inp)
+    out: Any = _try_invoke(chain, inp, config=config)
 
     # If the chain already returned a BaseModel, normalize to dict first
     if isinstance(out, BaseModel):
@@ -82,10 +91,9 @@ def _invoke_typed(expected_type: Type[T], chain, inp: Dict[str, Any]) -> T:
     if isinstance(out, dict):
         return expected_type.model_validate(obj=out)
 
-    # Fallback: let Pylance know we return T while avoiding runtime breakage
-    # (You can raise instead if you want strictness.)
+    # Fallback: let the type system know we return T while avoiding runtime breakage
+    # (Alternatively, raise a ValueError here if you require strictness.)
     return cast(T, out)
-
 
 
 def _sequence_to_list(xs: Optional[Sequence[str]]) -> List[str]:
@@ -175,6 +183,7 @@ class ProductManagerLLM:
                 "constraints": requirement.get("constraints", ""),
                 "nfr": requirement.get("nfr", ""),
             },
+            config=config,
         )
         vision = ProductVision(
             id=_gen_id("PV", requirement.get("id", "")),
@@ -193,6 +202,7 @@ class ProductManagerLLM:
                 "constraints": requirement.get("constraints", ""),
                 "nfr": requirement.get("nfr", ""),
             },
+            config=config,
         )
         solution = TechnicalSolution(
             id=_gen_id("TS", requirement.get("id", "")),
@@ -231,6 +241,7 @@ class ProductManagerLLM:
                 "interfaces": ", ".join(f"{k}:{v}" for k, v in (solution.interfaces or {}).items()),
                 "decisions": ", ".join(solution.decisions or []),
             },
+            config=config,
         )
 
         # Map epics
@@ -295,7 +306,7 @@ class ProductManagerLLM:
             for s in stories
         ]
         try:
-            qa_results_any = self.qa_chain.batch(qa_inputs, max_concurrency=4) or [None] * len(stories)
+            qa_results_any = self.qa_chain.batch(qa_inputs, config=config, max_concurrency=4) or [None] * len(stories)
             qa_results: List[Optional[QASpec]] = cast(List[Optional[QASpec]], qa_results_any)
         except Exception as e:
             # Never fail planning because QA parse failed
@@ -324,6 +335,7 @@ class ProductManagerLLM:
                 "epic_titles": ", ".join(e.title for e in epics[:6]),
                 "story_titles": ", ".join(s.title for s in stories[:12]),
             },
+            config=config,
         )
         notes = _sequence_to_list([])  # type: ignore[assignment]
         # notes is a list of DesignNoteDrafts; keep as Any and read attributes defensively
@@ -333,7 +345,7 @@ class ProductManagerLLM:
 
         design_notes: List[DesignNote] = []
         for nd in notes_any:
-            # Collect related ids, stripping Nones to keep Pylance happy
+            # Collect related ids, stripping Nones to keep type checkers happy
             rel_epic_ids = [
                 epic_id_by_title.get(t.strip().lower())
                 for t in _sequence_to_list(getattr(nd, "related_epic_titles", None))
@@ -373,7 +385,7 @@ class ProductManagerLLM:
                 }
             )
 
-        task_drafts_any = [ _try_invoke(self.tw_tasks_chain, inp) for inp in task_inputs ]
+        task_drafts_any = [_try_invoke(self.tw_tasks_chain, inp, config=config) for inp in task_inputs]
         task_drafts: List[TaskDraft] = cast(List[TaskDraft], task_drafts_any)
 
         tasks_by_story: Dict[str, List[Task]] = {s.id: [] for s in stories}
