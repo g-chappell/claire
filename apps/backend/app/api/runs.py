@@ -14,7 +14,7 @@ from app.storage.models import (
     RunManifestORM,
     RequirementORM,
 )
-from app.core.runs import hard_delete_run
+from app.core.runs import hard_delete_run, clear_plan_artifacts
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -165,3 +165,8 @@ def update_gate(run_id: str, body: GateUpdate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(manifest)
     return {"run_id": run_id, "vision_solution_status": manifest.data.get("vision_solution_status")}
+
+@router.delete("/runs/{run_id}/plan")
+def reset_plan(run_id: str, db: Session = Depends(get_db)):
+    counts = clear_plan_artifacts(db, run_id)
+    return {"ok": True, "deleted": counts, "kept": ["product_vision", "technical_solution"]}

@@ -19,6 +19,9 @@ from app.core.planner import (
 )
 from app.storage.models import ProductVisionORM, TechnicalSolutionORM, RunManifestORM, RequirementORM
 
+from app.core.runs import clear_plan_artifacts
+
+
 
 logger = logging.getLogger(__name__)
 
@@ -26,27 +29,27 @@ router = APIRouter()
 
 @router.post("/runs/{run_id}/plan", response_model=PlanBundle)
 def post_plan(run_id: str, force: bool = False, db: Session = Depends(get_db)):
+    """
+    Idempotent plan generation: if a plan exists and force=False, return it.
+    Otherwise, clear plan artefacts (PV/TS kept) and generate fresh.
+    """
     try:
         if not force:
-            # try to read; if missing, create
             try:
                 return read_plan(db, run_id)
             except ValueError as e:
-                if "plan not found" in str(e).lower():
-                    return plan_run(db, run_id)
-                raise
-        # force => always (re)plan
+                if "plan not found" not in str(e).lower():
+                    raise
+        # plan missing OR force=True → start clean (keep PV/TS)
+        clear_plan_artifacts(db, run_id)
         return plan_run(db, run_id)
-
     except ValueError as e:
         msg = str(e)
-        if "requirement not found" in msg.lower() or "plan not found" in msg.lower():
+        if "not found" in msg.lower():
             raise HTTPException(status_code=404, detail=msg)
         raise HTTPException(status_code=400, detail=msg)
-    except Exception as e:
+    except Exception:
         logger.exception("planning failed")
-        if os.getenv("DEBUG_PLANNING") == "1":
-            raise HTTPException(status_code=500, detail=f"planning failed: {e}")
         raise HTTPException(status_code=500, detail="planning failed")
 
 @router.get("/runs/{run_id}/plan", response_model=PlanBundle)
@@ -184,12 +187,14 @@ def post_finalise(
     db: Session = Depends(get_db),
 ):
     """
-    Generate epics/stories/notes/tasks/QA using the current PV/TS.
-    - If body includes overrides for PV or TS, they supersede the stored drafts.
+    Clear previous plan artefacts for this run (PV/TS remain), then generate epics/stories/tasks (and notes/QA if enabled).
     """
     try:
+        clear_plan_artifacts(db, run_id)
+
         vo = body.product_vision.model_dump() if (body and body.product_vision) else None
         so = body.technical_solution.model_dump() if (body and body.technical_solution) else None
+
         bundle = finalise_plan(db, run_id, vision_override=vo, solution_override=so)
         _set_gate_status(db, run_id, "approved")
         return bundle

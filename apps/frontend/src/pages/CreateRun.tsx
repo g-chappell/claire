@@ -1,7 +1,38 @@
 import { useEffect, useState } from "react";
-import { createRun, deleteRun, listRuns } from "../lib/api";
+import { createRun, listRuns } from "../lib/api";
 import type { RunCreate, RunSummary } from "../types";
 import { Link } from "react-router-dom";
+
+function Modal({
+  open,
+  title,
+  onClose,
+  children,
+}: {
+  open: boolean;
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      <div className="relative z-10 w-[min(680px,95vw)] rounded-xl border border-slate-700 bg-slate-900 p-4 shadow-xl">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-lg font-semibold">{title}</h2>
+          <button
+            className="px-2 py-1 rounded bg-slate-700 hover:bg-slate-600"
+            onClick={onClose}
+          >
+            Close
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
 
 export default function CreateRun() {
   const [title, setTitle] = useState("");
@@ -10,6 +41,10 @@ export default function CreateRun() {
   const [busy, setBusy] = useState(false);
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string>("");
+  const [delOpen, setDelOpen] = useState(false);
+  const [delCounts, setDelCounts] = useState<Record<string, number> | null>(null);
+  const API = (import.meta as any).env?.VITE_API_URL ?? "http://127.0.0.1:8000";
+
 
   async function refresh() {
     const list = await listRuns();
@@ -43,8 +78,17 @@ export default function CreateRun() {
     if (!confirm("Delete this run and ALL associated artefacts?")) return;
     setBusy(true);
     try {
-      await deleteRun(selectedId);
+      const res = await fetch(`${API}/runs/${selectedId}`, { method: "DELETE" });
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(txt || `HTTP ${res.status}`);
+      }
+      const data = await res.json(); // { ok: true, deleted: { … } }
+      setDelCounts(data?.deleted ?? null);
+      setDelOpen(true);
       await refresh();
+    } catch (e: any) {
+      alert(`Delete failed: ${e?.message ?? String(e)}`);
     } finally {
       setBusy(false);
     }
@@ -100,6 +144,40 @@ export default function CreateRun() {
           </Link>
         </div>
       </section>
+            <Modal
+        open={delOpen}
+        title="Run deleted"
+        onClose={() => setDelOpen(false)}
+      >
+        {delCounts ? (
+          <div>
+            <div className="opacity-80 mb-2">
+              Per-table delete counts for this run:
+            </div>
+            <table className="w-full text-sm border border-slate-800 rounded overflow-hidden">
+              <thead className="bg-slate-950/50">
+                <tr>
+                  <th className="text-left p-2 border-b border-slate-800">Table</th>
+                  <th className="text-right p-2 border-b border-slate-800">Deleted</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(delCounts).map(([k, v]) => (
+                  <tr key={k} className="odd:bg-slate-950/30">
+                    <td className="p-2">{k}</td>
+                    <td className="p-2 text-right tabular-nums">{v}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="opacity-70 text-xs mt-3">
+              Action is irreversible.
+            </div>
+          </div>
+        ) : (
+          <div className="opacity-80">No counts available.</div>
+        )}
+      </Modal>
     </div>
   );
 }

@@ -29,6 +29,12 @@ export default function PlanView() {
     return map;
   }, [bundle]);
 
+  const epicCount = bundle?.epics?.length ?? 0;
+  const storyCount = bundle?.stories?.length ?? 0;
+  const taskCount = useMemo(() => {
+    return (bundle?.stories ?? []).reduce((sum, s) => sum + (s.tasks?.length ?? 0), 0);
+  }, [bundle]);
+
   const productVision = bundle?.product_vision;
   const goals = productVision?.goals ?? [];
   const personas = productVision?.personas ?? [];
@@ -96,55 +102,65 @@ export default function PlanView() {
             </div>
           </Collapsible>
 
-          {/* Epics & Stories */}
-          <div className="space-y-3">
-            {bundle.epics.map((e: Epic) => (
-              <Collapsible key={e.id} title={`[${e.priority_rank}] ${e.title}`} defaultOpen={false}>
-                <p className="opacity-80 mb-3">{e.description}</p>
-                <div className="space-y-3">
-                  {(storiesByEpic[e.id] ?? []).map(st => (
-                    <div key={st.id} className="border border-slate-700 rounded-lg p-3">
-                      <div className="flex justify-between mb-1">
-                        <div className="font-semibold">[{st.priority_rank}] {st.title}</div>
-                        <code className="opacity-60">{st.id}</code>
+          {/* Epics (collapsible container with counts) */}
+          <Collapsible
+            title={`Epics — ${epicCount} epics • ${storyCount} stories • ${taskCount} tasks`}
+            defaultOpen
+          >
+            <div className="space-y-3 mt-3">
+              {bundle.epics.map((e: Epic) => (
+                <Collapsible key={e.id} title={`[${e.priority_rank}] ${e.title}`} defaultOpen={false}>
+                  <p className="opacity-80 mb-3">{e.description}</p>
+                  <div className="space-y-3">
+                    {(storiesByEpic[e.id] ?? []).map(st => (
+                      <div key={st.id} className="border border-slate-700 rounded-lg p-3">
+                        <div className="flex justify-between mb-1">
+                          <div className="font-semibold">[{st.priority_rank}] {st.title}</div>
+                          <code className="opacity-60">{st.id}</code>
+                        </div>
+                        <p className="opacity-80 mb-2">{st.description}</p>
+
+                        {!!st.tasks?.length && (
+                          <>
+                            <div className="opacity-70 text-sm mb-1">Tasks</div>
+                            <ol className="list-decimal ml-5 space-y-1">
+                              {st.tasks.map(t => <li key={t.id}>{t.title}</li>)}
+                            </ol>
+                          </>
+                        )}
+
+                        {!!st.acceptance?.length && (
+                          <>
+                            <div className="opacity-70 text-sm mt-3 mb-1">Acceptance (Gherkin)</div>
+                            <div className="grid gap-2">
+                              {st.acceptance.map((ac, i) => (
+                                <pre key={i} className="bg-slate-950/60 border border-slate-800 rounded p-3 whitespace-pre-wrap">
+                                  {ac.gherkin}
+                                </pre>
+                              ))}
+                            </div>
+                          </>
+                        )}
+
+                        {!!st.tests?.length && (
+                          <>
+                            <div className="opacity-70 text-sm mt-3 mb-1">Suggested tests</div>
+                            <ul className="list-disc ml-5 space-y-1">
+                              {st.tests.map((t,i)=><li key={i}>{t}</li>)}
+                            </ul>
+                          </>
+                        )}
                       </div>
-                      <p className="opacity-80 mb-2">{st.description}</p>
+                    ))}
+                    {!storiesByEpic[e.id]?.length && (
+                      <div className="opacity-60 text-sm">No stories for this epic yet.</div>
+                    )}
+                  </div>
+                </Collapsible>
+              ))}
+            </div>
+          </Collapsible>
 
-                      {!!st.tasks?.length && (
-                        <>
-                          <div className="opacity-70 text-sm mb-1">Tasks</div>
-                          <ol className="list-decimal ml-5 space-y-1">
-                            {st.tasks.map(t => <li key={t.id}>{t.title}</li>)}
-                          </ol>
-                        </>
-                      )}
-
-                      {!!st.acceptance?.length && (
-                        <>
-                          <div className="opacity-70 text-sm mt-3 mb-1">Acceptance (Gherkin)</div>
-                          <div className="grid gap-2">
-                            {st.acceptance.map((ac, i) => (
-                              <pre key={i} className="bg-slate-950/60 border border-slate-800 rounded p-3 whitespace-pre-wrap">{ac.gherkin}</pre>
-                            ))}
-                          </div>
-                        </>
-                      )}
-
-                      {!!st.tests?.length && (
-                        <>
-                          <div className="opacity-70 text-sm mt-3 mb-1">Suggested tests</div>
-                          <ul className="list-disc ml-5 space-y-1">
-                            {st.tests.map((t,i)=><li key={i}>{t}</li>)}
-                          </ul>
-                        </>
-                      )}
-                    </div>
-                  ))}
-                  {!storiesByEpic[e.id]?.length && <div className="opacity-60 text-sm">No stories for this epic yet.</div>}
-                </div>
-              </Collapsible>
-            ))}
-          </div>
 
           {/* Design notes */}
           {!!designNotes.length && (
