@@ -23,6 +23,10 @@ class _Common:
     LLM_MODEL: str = "claude-3-7-sonnet-20250219"
     TEMPERATURE: float = 0.2
 
+    # Feature flags (planning output)
+    FEATURE_QA: bool = False             # if False, skip generating acceptance/tests
+    FEATURE_DESIGN_NOTES: bool = False   # if False, skip generating tech writer design notes
+
     # DB (unified)
     DATABASE_URL: str = "sqlite:///./data/dev.db"  # dev default; prod overrides via env
 

@@ -38,24 +38,30 @@ def make_notes_chain(llm):
 def make_tasks_chain(llm):
     """
     Returns a chain that, given a single story input, emits TaskDraft for THAT story.
-    Orchestrator can batch() over stories.
+    Optimized for Serena: minimal, atomic, code-centric steps; no tests/AC/design notes; no tool or code prescriptions.
     """
     prompt = ChatPromptTemplate.from_messages([
         ("system",
-         "You are a pragmatic tech writer. Produce implementable, granular tasks that an engineer can execute.\n"
-         "STRICT RULES:\n"
-         "- Output MUST be valid JSON for the Pydantic schema TaskDraft.\n"
-         "- story_title MUST equal the provided story_title EXACTLY.\n"
-         "- items MUST be 5–10 atomic steps (no vague items like 'do the thing').\n"
-         "- Prefer verbs like: scaffold, implement, wire, validate, handle error, write unit test.\n"
-         "- Align tasks with acceptance criteria & interfaces.\n"),
+         "You are a Technical Writer producing a minimal task list for a coding agent named Serena.\n"
+         "Objectives:\n"
+         "• Use the FEWEST tasks needed to complete the story. If the story is already satisfied, return ZERO tasks.\n"
+         "• Each task is ATOMIC and code-centric (one concrete action).\n"
+         "• STRICTLY no scope creep: do not add unrelated work or future enhancements.\n\n"
+         "Guardrails:\n"
+         "• Output MUST be valid JSON for the Pydantic schema TaskDraft.\n"
+         "• story_title MUST equal the provided story_title EXACTLY.\n"
+         "• Do NOT include testing tasks, acceptance criteria, Gherkin/BDD, design notes, or documentation tasks.\n"
+         "• Do NOT prescribe tools, commands, libraries, or exact code. Hint the outcome, not the implementation.\n"
+         "• Prefer outcome verbs like: create, update, implement, wire, integrate, persist, handle, refactor (scoped), remove (scoped).\n"
+         "• Keep each task to a single action; split if a second action would be required.\n"
+         "• If a step cannot be executed without prior work, reorder or add the minimal prerequisite step only if it is part of this story.\n"),
         ("human",
-         "Story:\n"
+         "Story Context:\n"
          "- story_title: {story_title}\n"
          "- description: {story_description}\n"
          "- epic_title: {epic_title}\n"
-         "- interfaces: {interfaces}\n"
-         "- acceptance_criteria (Gherkin snippets):\n{gherkin}\n"
+         "- relevant_interfaces (optional): {interfaces}\n"
+         "- stack hint (do not prescribe tools): Node/Express backend, React + Zustand UI, SQLite, Vite tooling\n"
          "Return JSON ONLY."),
     ])
     return prompt | llm.with_structured_output(TaskDraft)

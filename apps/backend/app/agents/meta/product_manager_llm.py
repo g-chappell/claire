@@ -38,6 +38,27 @@ from app.core.models import (
     TechnicalSolution,
 )
 
+import random
+import time
+
+try:
+    from anthropic._exceptions import (
+        OverloadedError,
+        RateLimitError,
+        APITimeoutError,
+        APIStatusError,
+    )
+    PROVIDER_EXCEPTIONS = (OverloadedError, RateLimitError, APITimeoutError, APIStatusError)
+except Exception:
+    PROVIDER_EXCEPTIONS = tuple()
+
+PROVIDER_TRANSIENT_STATUSES = {429, 500, 502, 503, 504, 529}
+
+from app.configs.settings import get_settings
+settings = get_settings()
+
+
+
 # --------------------------------------------------------------------------------------
 # Helpers
 # --------------------------------------------------------------------------------------
@@ -52,28 +73,53 @@ def _gen_id(prefix: str, raw: str) -> str:
     return f"{prefix}_{hashlib.md5(raw.encode('utf-8')).hexdigest()[:10]}"
 
 
-def _try_invoke(chain, inp: Dict[str, Any], config: Optional[RunnableConfig] = None):
+def _try_invoke(
+    chain,
+    inp: Dict[str, Any],
+    config: Optional[RunnableConfig] = None,
+    max_attempts: int = 6,
+    base_delay: float = 0.5,
+    max_delay: float = 8.0,
+):
     """
-    Invoke a LangChain runnable with a simple second-chance retry that hints schema repair.
-    Compatible with LangChain v1: pass RunnableConfig via the `config` kwarg.
+    Resilient invoke with exponential backoff + jitter for transient provider issues.
+    Also attempts one schema-repair retry by injecting a 'repair_hint' if a non-transient error occurs.
     """
-    err: Optional[Exception] = None
     payload: Dict[str, Any] = dict(inp)
-    for _ in range(RETRY_ATTEMPTS):
+    tried_repair = False
+
+    for attempt in range(1, max_attempts + 1):
         try:
-            # v1 runnables accept `config=` directly
             return chain.invoke(payload, config=config)
-        except Exception as e:  # parsing/validation hiccup
-            err = e
-            payload = {
-                **payload,
-                "repair_hint": (
-                    f"Previous output failed schema: {type(e).__name__}. "
-                    "Return VALID JSON for the requested schema (no extra keys)."
-                ),
-            }
-    if err:
-        raise err
+
+        except Exception as e:
+            # Treat Anthropic overload/rate limit/timeouts (if available) or HTTP-style transient statuses as retryable.
+            status = getattr(e, "status_code", None)
+            is_provider_exc = isinstance(e, PROVIDER_EXCEPTIONS)
+            transient = is_provider_exc or (status in PROVIDER_TRANSIENT_STATUSES)
+
+            if transient and attempt < max_attempts:
+                # Exponential backoff with jitter (0.6x–1.4x)
+                delay = min(max_delay, base_delay * (2 ** (attempt - 1)))
+                delay *= (0.6 + random.random() * 0.8)
+                time.sleep(delay)
+                continue
+
+            # If it's not transient, attempt one schema-repair pass
+            if not transient and not tried_repair:
+                tried_repair = True
+                payload = {
+                    **payload,
+                    "repair_hint": (
+                        f"Previous output failed schema: {type(e).__name__}. "
+                        "Return VALID JSON for the requested schema (no extra keys)."
+                    ),
+                }
+                time.sleep(0.4)
+                continue
+
+            # Give up
+            raise
 
 
 def _invoke_typed(expected_type: Type[T], chain, inp: Dict[str, Any], config: Optional[RunnableConfig] = None) -> T:
@@ -154,12 +200,11 @@ class ProductManagerLLM:
 
     def __init__(self, model: Optional[str] = None):
         llm = make_chat_model(model)
-        # Bind role chains
         self.vision_chain = VISION.make_chain(llm)
         self.arch_chain = ARCH.make_chain(llm)
         self.ra_chain = RA.make_chain(llm)
-        self.qa_chain = QA.make_chain(llm)
-        self.tw_notes_chain = TW.make_notes_chain(llm)
+        self.qa_chain = QA.make_chain(llm) if settings.FEATURE_QA else None
+        self.tw_notes_chain = TW.make_notes_chain(llm) if settings.FEATURE_DESIGN_NOTES else None
         self.tw_tasks_chain = TW.make_tasks_chain(llm)
 
     # ---------- Stage A: generate vision + solution (the "gate") ----------
@@ -295,96 +340,102 @@ class ProductManagerLLM:
         # PM ordering
         epics, stories = _order_epics_and_stories(epics, stories)
 
-        # ---------- QA per story (so we can feed AC into tasks) ----------
-        qa_inputs = [
-            {
-                "title": s.title,
-                "description": s.description,
-                "epic_title": next((e.title for e in epics if e.id == s.epic_id), ""),
-                "interfaces": ", ".join(f"{k}:{v}" for k, v in (solution.interfaces or {}).items()),
-            }
-            for s in stories
-        ]
-        try:
-            qa_results_any = self.qa_chain.batch(qa_inputs, config=config, max_concurrency=4) or [None] * len(stories)
-            qa_results: List[Optional[QASpec]] = cast(List[Optional[QASpec]], qa_results_any)
-        except Exception as e:
-            # Never fail planning because QA parse failed
-            solution.decisions = (solution.decisions or []) + [f"QA parse failed ({type(e).__name__}); continuing."]
-            qa_results = [None] * len(stories)
+        # Title->ID maps used by downstream steps (tasks, notes)
+        epic_id_by_title: Dict[str, str] = {e.title.strip().lower(): e.id for e in epics}
+        story_id_by_title: Dict[str, str] = {s.title.strip().lower(): s.id for s in stories}
 
-        for s, qa in zip(stories, qa_results):
-            gherkins = _sequence_to_list(getattr(qa, "gherkin", None)) if qa else []
-            if not gherkins:
-                gherkins = [
-                    "Given the system is running\nWhen the user performs the main action\nThen an observable successful result is returned"
-                ]
-            s.acceptance = [AcceptanceCriteria(story_id=s.id, gherkin=g) for g in gherkins]
-            s.tests = _sequence_to_list(getattr(qa, "unit_tests", None)) if qa else []
+        # ---------- QA per story (acceptance/tests) ----------
+        if settings.FEATURE_QA and self.qa_chain is not None:
+            qa_inputs = [
+                {
+                    "title": s.title,
+                    "description": s.description,
+                    "epic_title": next((e.title for e in epics if e.id == s.epic_id), ""),
+                    "interfaces": ", ".join(f"{k}:{v}" for k, v in (solution.interfaces or {}).items()),
+                }
+                for s in stories
+            ]
+            try:
+                qa_results_any = self.qa_chain.batch(qa_inputs, config=config, max_concurrency=4) or [None] * len(stories)
+                qa_results: List[Optional[QASpec]] = cast(List[Optional[QASpec]], qa_results_any)
+            except Exception as e:
+                solution.decisions = (solution.decisions or []) + [f"QA parse failed ({type(e).__name__}); continuing."]
+                qa_results = [None] * len(stories)
+
+            for s, qa in zip(stories, qa_results):
+                gherkins = _sequence_to_list(getattr(qa, "gherkin", None)) if qa else []
+                s.acceptance = [AcceptanceCriteria(story_id=s.id, gherkin=g) for g in gherkins]
+                s.tests = _sequence_to_list(getattr(qa, "unit_tests", None)) if qa else []
+        else:
+            # QA disabled: ensure stories carry no acceptance/tests
+            for s in stories:
+                s.acceptance = []
+                s.tests = []
 
         # ---------- Tech Writer: Design Notes ----------
-        notes_bundle: TechWritingBundleDraft = _invoke_typed(
-            TechWritingBundleDraft,
-            self.tw_notes_chain,
-            {
-                "features": ", ".join(vision.features),
-                "stack": ", ".join(solution.stack or []),
-                "modules": ", ".join(solution.modules or []),
-                "interfaces": ", ".join(f"{k}:{v}" for k, v in (solution.interfaces or {}).items()),
-                "decisions": ", ".join(solution.decisions or []),
-                "epic_titles": ", ".join(e.title for e in epics[:6]),
-                "story_titles": ", ".join(s.title for s in stories[:12]),
-            },
-            config=config,
-        )
-        notes = _sequence_to_list([])  # type: ignore[assignment]
-        # notes is a list of DesignNoteDrafts; keep as Any and read attributes defensively
-        notes_any: Any = getattr(notes_bundle, "notes", []) or []
-        epic_id_by_title = {e.title.strip().lower(): e.id for e in epics}
-        story_id_by_title = {s.title.strip().lower(): s.id for s in stories}
-
         design_notes: List[DesignNote] = []
-        for nd in notes_any:
-            # Collect related ids, stripping Nones to keep type checkers happy
-            rel_epic_ids = [
-                epic_id_by_title.get(t.strip().lower())
-                for t in _sequence_to_list(getattr(nd, "related_epic_titles", None))
-            ]
-            rel_story_ids = [
-                story_id_by_title.get(t.strip().lower())
-                for t in _sequence_to_list(getattr(nd, "related_story_titles", None))
-            ]
-            rel_epic_ids = [x for x in rel_epic_ids if isinstance(x, str)]
-            rel_story_ids = [x for x in rel_story_ids if isinstance(x, str)]
 
-            dn_id = _gen_id("DN", requirement.get("id", "") + ":" + getattr(nd, "title", "note"))
-            design_notes.append(
-                DesignNote(
-                    id=dn_id,
-                    title=getattr(nd, "title", ""),
-                    kind=getattr(nd, "kind", "other"),
-                    body_md=getattr(nd, "body_md", ""),
-                    tags=_sequence_to_list(getattr(nd, "tags", None)),
-                    related_epic_ids=rel_epic_ids,
-                    related_story_ids=rel_story_ids,
-                )
+        if settings.FEATURE_DESIGN_NOTES and self.tw_notes_chain is not None:
+            notes_bundle: TechWritingBundleDraft = _invoke_typed(
+                TechWritingBundleDraft,
+                self.tw_notes_chain,
+                {
+                    "features": ", ".join(vision.features),
+                    "stack": ", ".join(solution.stack or []),
+                    "modules": ", ".join(solution.modules or []),
+                    "interfaces": ", ".join(f"{k}:{v}" for k, v in (solution.interfaces or {}).items()),
+                    "decisions": ", ".join(solution.decisions or []),
+                    "epic_titles": ", ".join(e.title for e in epics[:6]),
+                    "story_titles": ", ".join(s.title for s in stories[:12]),
+                },
+                config=config,
             )
+
+            notes_any: Any = getattr(notes_bundle, "notes", []) or []
+
+            for nd in notes_any:
+                rel_epic_ids = [
+                    epic_id_by_title.get(t.strip().lower())
+                    for t in _sequence_to_list(getattr(nd, "related_epic_titles", None))
+                ]
+                rel_story_ids = [
+                    story_id_by_title.get(t.strip().lower())
+                    for t in _sequence_to_list(getattr(nd, "related_story_titles", None))
+                ]
+                rel_epic_ids = [x for x in rel_epic_ids if isinstance(x, str)]
+                rel_story_ids = [x for x in rel_story_ids if isinstance(x, str)]
+
+                dn_id = _gen_id("DN", requirement.get("id", "") + ":" + getattr(nd, "title", "note"))
+                design_notes.append(
+                    DesignNote(
+                        id=dn_id,
+                        title=getattr(nd, "title", ""),
+                        kind=getattr(nd, "kind", "other"),
+                        body_md=getattr(nd, "body_md", ""),
+                        tags=_sequence_to_list(getattr(nd, "tags", None)),
+                        related_epic_ids=rel_epic_ids,
+                        related_story_ids=rel_story_ids,
+                    )
+                )
+        # else: design_notes remains []
 
         # ---------- Tech Writer: Tasks per story (batch over stories) ----------
         epic_title_by_id = {e.id: e.title for e in epics}
-        task_inputs = []
-        for s in stories:
-            gherkin_block = "\n".join([ac.gherkin for ac in (s.acceptance or []) if ac.gherkin])
-            task_inputs.append(
-                {
-                    "story_title": s.title,
-                    "story_description": s.description,
-                    "epic_title": epic_title_by_id.get(s.epic_id, ""),
-                    "interfaces": ", ".join(f"{k}:{v}" for k, v in (solution.interfaces or {}).items()),
-                    "gherkin": gherkin_block,
-                }
-            )
+        task_inputs: List[Dict[str, str]] = []
 
+        for s in stories:
+            payload: Dict[str, str] = {
+                "story_title": s.title,
+                "story_description": s.description,
+                "epic_title": epic_title_by_id.get(s.epic_id, ""),
+                "interfaces": ", ".join(f"{k}:{v}" for k, v in (solution.interfaces or {}).items()),
+            }
+            if settings.FEATURE_QA:
+                gherkin_block = "\n".join([ac.gherkin for ac in (s.acceptance or []) if getattr(ac, "gherkin", "")])
+                payload["gherkin"] = gherkin_block
+            task_inputs.append(payload)
+
+        # One call per story, with resilient invoke
         task_drafts_any = [_try_invoke(self.tw_tasks_chain, inp, config=config) for inp in task_inputs]
         task_drafts: List[TaskDraft] = cast(List[TaskDraft], task_drafts_any)
 
@@ -397,18 +448,22 @@ class ProductManagerLLM:
             items = _sequence_to_list(getattr(td, "items", None))
             for i, title in enumerate(items, start=1):
                 tid = _gen_id("T", requirement.get("id", "") + ":" + sid + f":{i}:{title}")
-                tasks_by_story[sid].append(Task(id=tid, story_id=sid, title=title, order=i, status="todo"))
+                tasks_by_story[sid].append(
+                    Task(id=tid, story_id=sid, title=title, order=i, status="todo")
+                )
 
         for s in stories:
             s.tasks = tasks_by_story.get(s.id, [])
-
+        
+        # FINAL RETURN — use the correct PlanBundle field names
         return PlanBundle(
             product_vision=vision,
             technical_solution=solution,
             epics=epics,
             stories=stories,
-            design_notes=design_notes,
+            design_notes=design_notes,  # [] when FEATURE_DESIGN_NOTES is False
         )
+            
 
     # ---------- Convenience: full single-shot plan (kept for parity) ----------
 
