@@ -1,109 +1,107 @@
-# apps/backend/app/agents/coding/coding_agent.py
 from __future__ import annotations
-from typing import Optional, Sequence, cast, Any, List, Dict, Annotated, TypedDict, Union
+from typing import Any, Dict, List, Optional, Sequence, Union, cast
 from fastapi import Request
 
-from langchain.chat_models import init_chat_model
 from langchain.agents import create_agent
-from langchain_core.messages import HumanMessage, AIMessage
-from langchain_core.tools import BaseTool
+from langchain_core.messages import HumanMessage
 from langgraph.graph.message import add_messages, AnyMessage
-
+from langchain_core.tools import BaseTool
+from langchain_core.language_models.chat_models import BaseChatModel
 from app.configs.settings import get_settings
 from app.agents.coding.serena_tools import get_serena_tools, close_serena
+from app.agents.lc.model_factory import make_chat_model  # your existing factory
 
-SYSTEM_PROMPT = """You are CLAIRE's Coding Agent.
-Use Serena MCP tools for ALL code understanding and edits:
-- find_symbol, find_referencing_symbols, read_file, create_text_file,
-  insert_after_symbol, replace_symbol, move_symbol, run_tests, etc.
+FALLBACK_NO_SHELL = (
+    "Shell may be unavailable. If you cannot run commands, scaffold by writing files directly:\n"
+    "- create package.json with minimal scripts (dev, build, start)\n"
+    "- tsconfig.json, vite.config.ts, src/main.tsx, src/App.tsx\n"
+    "- server/index.ts with Express app\n"
+    "Use create_text_file / insert_* / replace_* tools to implement.\n"
+)
+
+SYSTEM_PROMPT = """You are CLAIRE's Coding Agent (Serena).
+Use ONLY the provided Serena tools for code actions (read/edit/patch/move; small allowed commands).
 Rules:
-- Work in small, verifiable steps per story.
-- After each edit, read relevant files/symbols to verify changes.
-- Prefer symbol-level edits over raw string replaces.
-- Do not hallucinate paths; list files before writing.
-- Keep diffs minimal and idempotent; re-run tests when available.
+- Work in the FEWEST steps needed for the current task.
+- Stay strictly within the task's scope; no tests/docs/acceptance.
+- Prefer structured edits (symbol-level / patch) over large rewrites.
+- Verify after each change by reading the affected files/symbols.
+- Keep diffs minimal and idempotent.
 """
 
-# Allow both LC message objects and dict-like messages (what the v1 stubs accept)
 JsonMessage = Dict[str, Any]
 MessagesInput = List[Union[AnyMessage, JsonMessage]]
 
-class AgentInputState(TypedDict):
-    # "messages" uses the add_messages reducer in LangGraph
-    messages: Annotated[MessagesInput, add_messages]
-
-
 class CodingAgent:
     def __init__(self, model: Optional[str] = None, temperature: float = 0.0):
-        settings = get_settings()
-        self.llm = init_chat_model(
-            model=(model or settings.LLM_MODEL),
-            model_provider="anthropic",
-            temperature=temperature,
-        )
+            # keep a handle to settings for later (recursion_limit, etc.)
+            self.settings = get_settings()
+            # use your factory, which already returns a BaseChatModel with retries/timeouts set
+            self.llm: BaseChatModel = make_chat_model(model=model, temperature=temperature)
+            # NOTE: avoid .bind(...) here because it returns a Runnable (breaks create_agent typing)
 
-    async def for_request(self, request: Request, project_dir: Optional[str] = None):
+    async def _agent_for(self, request: Request, project_dir: Optional[str]) -> Any:
         tools = await get_serena_tools(request, project_dir=project_dir)
-        if not tools:
-            raise RuntimeError("Serena MCP connected but exposed 0 tools.")
         tools_seq: Sequence[BaseTool] = cast(Sequence[BaseTool], tools)
-
-        # v1: returns a runnable graph directly (no .compile())
         agent = create_agent(
-            model=self.llm,
+            model=cast(BaseChatModel, self.llm),
             tools=tools_seq,
-            system_prompt=SYSTEM_PROMPT,
+            system_prompt=SYSTEM_PROMPT + "\n\n" + FALLBACK_NO_SHELL,
             name="SerenaCoder",
         )
         return agent
 
-    async def implement_story(
+    async def implement_task(
         self,
         request: Request,
+        *,
+        project_dir: str,
+        product_vision: str,
+        technical_solution: str,
+        epic_title: str,
         story_title: str,
         story_desc: str,
-        project_dir: Optional[str] = None,
+        task_title: str,
     ) -> dict:
-        agent = await self.for_request(request, project_dir=project_dir)
+        """
+        Execute the FEWEST Serena steps to complete ONE task with full PV/TS/story context.
+        Returns {output, events}.
+        """
+        agent = await self._agent_for(request, project_dir=project_dir)
 
-        messages: MessagesInput = [
-            HumanMessage(
-                content=(
-                    f"Story: {story_title}\n\n"
-                    f"Acceptance (or description):\n{story_desc}\n\n"
-                    "Implement this story using Serena tools, step by step."
-                )
-            )
-        ]
+        prompt = (
+            f"Product Vision (summary): {product_vision}\n"
+            f"Technical Solution (stack/modules): {technical_solution}\n"
+            f"Epic: {epic_title}\n"
+            f"Story: {story_title} — {story_desc}\n"
+            f"Task: {task_title}\n\n"
+            "Implement ONLY this task in the fewest possible steps using Serena tools."
+        )
 
-        # ✔ Type the event list correctly
-        intermediate_events: List[Dict[str, Any]] = []
+        # LangGraph-compatible input (messages in state)
+        state = {"messages": [HumanMessage(content=prompt)]}
 
-        # ✔ Provide a properly-typed state for the agent
-        state: AgentInputState = {"messages": messages}
+        # Bound tool/LLM recursion (iterations)
+        cfg = {"recursion_limit": int(getattr(self.settings, "CODING_RECURSION_LIMIT", 30))}
 
+        events: List[Dict[str, Any]] = []
         try:
-            # Stream events (tool calls, model tokens, etc.)
-            async for ev in agent.astream_events(cast(Any, state)):
-                intermediate_events.append(cast(Dict[str, Any], ev))
+            async for ev in agent.astream_events(cast(Any, state), config=cfg):
+                events.append(cast(Dict[str, Any], ev))
 
-            # Final result
-            final = await agent.ainvoke(cast(Any, state))
+            final = await agent.ainvoke(cast(Any, state), config=cfg)
 
-            # Extract a useful output string
-            output_text: Optional[str] = None
+            # Extract final assistant text
+            output_text: str = ""
             msgs = final.get("messages") if isinstance(final, dict) else None
             if isinstance(msgs, list) and msgs:
                 for m in reversed(msgs):
                     if getattr(m, "type", None) == "ai" or m.__class__.__name__ == "AIMessage":
-                        output_text = getattr(m, "content", None)
+                        output_text = getattr(m, "content", "") or ""
                         break
-            if output_text is None:
+            if not output_text:
                 output_text = str(final)
 
-            return {
-                    "output": output_text,
-                    "intermediate_steps": intermediate_events,  # List[StreamEvent]
-                }
+            return {"output": output_text, "events": events}
         finally:
             await close_serena(request)

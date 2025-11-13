@@ -54,8 +54,30 @@ class _Common:
         "serena", "start-mcp-server",
         "--context", "ide-assistant",
     ]
-    SERENA_PROJECT_DIR: str = "."      # fallback only
+    
+    CODING_RECURSION_LIMIT: int = 60  # safe default; raise to 24–32 if needed
+    CODING_MAX_TURNS: int = 10        # optional guard for agents that support it
+    SERENA_PROJECT_DIR: str = "./data/code"       # Fallback project dir (per-run workspace overrides)
     CODE_WORKSPACES_ROOT: str = "./data/code"  # default; override via env
+
+    SERENA_ALLOW_SHELL: bool = True
+    SERENA_ALLOWED_TOOL_NAMES: list[str] = [
+        "list_dir",
+        "find_file",
+        "read_file",
+        "create_text_file",
+        "search_for_pattern",
+        "get_symbols_overview",
+        "find_symbol",
+        "find_referencing_symbols",
+        "replace_symbol_body",
+        "insert_after_symbol",
+        "insert_before_symbol",
+        "replace_regex",
+        "rename_symbol",
+        "activate_project",
+        "get_current_config",
+    ]
 
 
 if V2:
