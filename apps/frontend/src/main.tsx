@@ -7,10 +7,10 @@ import "./index.css";
 // pages
 import CreateRun from "./pages/CreateRun";
 import ChatPage from "./pages/ChatPage";
-import SettingsPage from "./pages/SettingsPage";
 import PlanManageRun from "./pages/PlanManageRun";
 import PlanGenerate from "./pages/PlanGenerate";
 import PlanView from "./pages/PlanView";
+import ImplementCodePage from "./pages/ImplementCode";
 
 const router = createBrowserRouter([
   {
@@ -23,9 +23,9 @@ const router = createBrowserRouter([
       { path: "plan/manage", element: <PlanManageRun /> },
       { path: "plan/generate", element: <PlanGenerate /> },
       { path: "plan/view", element: <PlanView /> },
-      { path: "implement", element: <div className="p-6 opacity-60">Implement (coming soon)</div> },
+      { path: "implement", element: <ImplementCodePage /> },
       { path: "review", element: <div className="p-6 opacity-60">Review (coming soon)</div> },
-      { path: "settings", element: <SettingsPage /> },
+      { path: "settings", element: <div className="p-6 opacity-60">Review (coming soon)</div> },
     ],
   },
 ]);

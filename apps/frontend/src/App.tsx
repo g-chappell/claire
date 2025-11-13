@@ -25,8 +25,11 @@ export default function App() {
 
           <div className="mt-4 text-xs uppercase tracking-wide opacity-60 px-4">Execution</div>
           <NavLink to="/implement" className={({isActive})=> `${link} ${isActive?active:""}`}>Implement</NavLink>
-          <NavLink to="/review"    className={({isActive})=> `${link} ${isActive?active:""}`}>Review</NavLink>
 
+          <div className="mt-4 text-xs uppercase tracking-wide opacity-60 px-4">Review</div>
+          <NavLink to="/review"    className={({isActive})=> `${link} ${isActive?active:""}`}>Retrospective</NavLink>
+
+          <div className="mt-4 text-xs uppercase tracking-wide opacity-60 px-4">Configuration</div>
           <div className="mt-4"></div>
           <NavLink to="/settings" className={({isActive})=> `${link} ${isActive?active:""}`}>Settings</NavLink>
         </nav>

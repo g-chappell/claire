@@ -166,3 +166,54 @@ export async function getGateStatus(runId: string) {
   if (!res.ok) throw new Error(await res.text());
   return res.json() as Promise<{ run_id: string; vision_solution_status: string | null }>;
 }
+
+// --- PLAN: fetch a plan bundle for a run ---
+// Tries /plan/runs/{id}. If that 404s, falls back to /runs/{id}.
+export async function fetchPlanBundle(runId: string): Promise<{
+  epics: Array<{ title: string; description?: string }>;
+  stories: Array<{ id?: string; story_id?: string; epic_title: string; title: string; description?: string }>;
+  tasks: Array<{ id?: string; task_id?: string; story_id?: string; title?: string; description?: string; order?: number }>;
+}> {
+  const base = (import.meta.env.VITE_API_URL || "http://127.0.0.1:8000").replace(/\/+$/, "");
+  const tryFetch = async (url: string) => {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
+  };
+
+  try {
+    // Primary: dedicated planning endpoint
+    const data = await tryFetch(`${base}/plan/runs/${encodeURIComponent(runId)}`);
+    return normalizePlanShape(data);
+  } catch (e: any) {
+    // Fallback: some backends return epics/stories/tasks on /runs/{id}
+    const fallback = await tryFetch(`${base}/runs/${encodeURIComponent(runId)}`);
+    return normalizePlanShape(fallback);
+  }
+
+  // ---- helpers ----
+  function normalizePlanShape(src: any) {
+    // Accepts { epics, stories, tasks } or places where those live under nested keys.
+    const epics = coerceArray(src?.epics ?? src?.plan?.epics ?? []);
+    const stories = coerceArray(src?.stories ?? src?.plan?.stories ?? []);
+    // tasks may be flat OR nested under each story
+    let tasks = coerceArray(src?.tasks ?? src?.plan?.tasks ?? []);
+    if (!tasks.length && stories.length) {
+      // If tasks are nested under stories
+      const flat: any[] = [];
+      for (const s of stories) {
+        const sid = (s.id || s.story_id || "").toString();
+        const sTasks = coerceArray(s?.tasks ?? s?.plan_tasks ?? []);
+        for (const t of sTasks) {
+          flat.push({ ...t, story_id: t.story_id ?? sid });
+        }
+      }
+      tasks = flat;
+    }
+    return { epics, stories, tasks };
+  }
+
+  function coerceArray(v: any) {
+    return Array.isArray(v) ? v : v ? [v] : [];
+  }
+}
