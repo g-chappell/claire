@@ -8,60 +8,68 @@ from app.agents.lc.schemas import TechWritingBundleDraft, TaskDraft
 
 def make_notes_chain(llm):
     """
-    Returns a chain that emits ONLY design notes (no tasks).
-    Output is parsed as TechWritingBundleDraft but we only use .notes.
+    Emits ONLY design notes (no tasks). Output is parsed as TechWritingBundleDraft but we only use .notes.
     """
     prompt = ChatPromptTemplate.from_messages([
         ("system",
-         "You are a senior technical writer. Create concise design notes to guide implementation.\n"
-         "STRICT RULES:\n"
-         "- Output MUST be valid JSON for the Pydantic schema TechWritingBundleDraft (notes only).\n"
-         "- Fill `notes` with 2–5 items. Do NOT include tasks here.\n"
-         "- Each note MUST have: title, kind in {{overview,api,frontend,repo,quality,risk,other}}, body_md.\n"
-         "- Use related_epic_titles and related_story_titles to link by EXACT TITLES from the provided lists.\n"),
+         "You are a senior Technical Writer producing concise **design notes** that guide implementation without over-specifying it.\n"
+         "\nBEHAVIORAL CONTRACT:\n"
+         "• Purpose: capture the **why/what** (concepts, interfaces, risks, quality) — not the **how** (files, tools, commands).\n"
+         "• Scope: 2–5 notes max. Each note stands alone and is actionable as guidance for coding & planning agents.\n"
+         "• Linkage: reference epics/stories by **EXACT TITLE** when relevant.\n"
+         "• Conventions: **do not hardcode** file paths, extensions, frameworks, or CLIs. If a convention matters, phrase it as\n"
+         "  “follow existing repository conventions discovered at execution time”.\n"
+         "• No checklists, no tasks, no acceptance criteria.\n"
+         "\nSTRICT OUTPUT RULES:\n"
+         "• Return **JSON ONLY** conforming to TechWritingBundleDraft (notes only).\n"
+         "• Each note requires: title, kind in {overview, api, frontend, repo, quality, risk, other}, body_md.\n"
+         "• Use related_epic_titles / related_story_titles arrays with exact titles from the provided lists.\n"
+         "\nPRIOR FEEDBACK (improve notes accordingly if present):\n"
+         "--- START FEEDBACK ---\n{feedback_context}\n--- END FEEDBACK ---"),
         ("human",
-         "Context:\n"
+         "Project context:\n"
          "- Features: {features}\n"
-         "- Stack: {stack}\n"
+         "- Stack (high level, optional): {stack}\n"
          "- Modules: {modules}\n"
          "- Interfaces: {interfaces}\n"
-         "- Decisions: {decisions}\n"
-         "- Epics: {epic_titles}\n"
-         "- Stories: {story_titles}\n"
+         "- Decisions (known): {decisions}\n"
+         "- Epic titles: {epic_titles}\n"
+         "- Story titles: {story_titles}\n"
          "Return JSON ONLY."),
     ])
-    # Force the structured shape via LC v1 structured output
     return prompt | llm.with_structured_output(TechWritingBundleDraft)
 
 # --- Per-story Tasks ---
 
 def make_tasks_chain(llm):
     """
-    Returns a chain that, given a single story input, emits TaskDraft for THAT story.
-    Optimized for Serena: minimal, atomic, code-centric steps; no tests/AC/design notes; no tool or code prescriptions.
+    Emits a minimal, atomic TaskDraft list for a single story.
+    Optimized for Serena: specific outcomes, zero tool/path prescriptions, align with repo conventions at execution time.
     """
     prompt = ChatPromptTemplate.from_messages([
         ("system",
-         "You are a Technical Writer producing a minimal task list for a coding agent named Serena.\n"
-         "Objectives:\n"
-         "• Use the FEWEST tasks needed to complete the story. If the story is already satisfied, return ZERO tasks.\n"
-         "• Each task is ATOMIC and code-centric (one concrete action).\n"
-         "• STRICTLY no scope creep: do not add unrelated work or future enhancements.\n\n"
-         "Guardrails:\n"
-         "• Output MUST be valid JSON for the Pydantic schema TaskDraft.\n"
-         "• story_title MUST equal the provided story_title EXACTLY.\n"
-         "• Do NOT include testing tasks, acceptance criteria, Gherkin/BDD, design notes, or documentation tasks.\n"
-         "• Do NOT prescribe tools, commands, libraries, or exact code. Hint the outcome, not the implementation.\n"
-         "• Prefer outcome verbs like: create, update, implement, wire, integrate, persist, handle, refactor (scoped), remove (scoped).\n"
-         "• Keep each task to a single action; split if a second action would be required.\n"
-         "• If a step cannot be executed without prior work, reorder or add the minimal prerequisite step only if it is part of this story.\n"),
+         "You are a Technical Writer generating the **smallest sufficient** list of atomic implementation tasks for a single story.\n"
+         "\nBEHAVIORAL CONTRACT:\n"
+         "• Minimize: use the fewest tasks needed; if the story is already satisfied, return **zero** tasks.\n"
+         "• Atomicity: one concrete outcome per task (create/update/wire/integrate/persist/handle/refactor/remove). No multi-step blends.\n"
+         "• Ordering: include only prerequisites that are truly required **for this story**; otherwise omit.\n"
+         "• Non-prescriptive: **do not** specify file paths, file extensions (.ts/.js, etc.), frameworks, libraries, tools, or commands.\n"
+         "  Defer these to existing repository conventions discovered at execution time by the coding agent.\n"
+         "• No tests/AC/BDD/design-notes/documentation here.\n"
+         "• No duplication. If two tasks overlap, keep the single most outcome-oriented one.\n"
+         "\nSTRICT OUTPUT RULES:\n"
+         "• Return **JSON ONLY** conforming to TaskDraft.\n"
+         "• story_title MUST equal the provided story_title exactly.\n"
+         "• Titles should be short outcome statements; descriptions clarify **what changes** should exist after completion, not how to implement.\n"
+         "\nPRIOR FEEDBACK (improve tasks accordingly if present):\n"
+         "--- START FEEDBACK ---\n{feedback_context}\n--- END FEEDBACK ---"),
         ("human",
-         "Story Context:\n"
+         "Story context:\n"
          "- story_title: {story_title}\n"
          "- description: {story_description}\n"
          "- epic_title: {epic_title}\n"
          "- relevant_interfaces (optional): {interfaces}\n"
-         "- stack hint (do not prescribe tools): Node/Express backend, React + Zustand UI, SQLite, Vite tooling\n"
          "Return JSON ONLY."),
     ])
     return prompt | llm.with_structured_output(TaskDraft)
+

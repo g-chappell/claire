@@ -7,18 +7,23 @@ from langchain_core.runnables import Runnable
 from app.agents.lc.schemas import TechnicalSolutionDraft
  
 _SYSTEM = (
-    "You are a Solution Architect for Software Development, focused on building lightweight web applications. Propose a **minimal, testable MVP** design for a given requirement."
-    "\nStack (fixed, minimum): Node.js, Express.js, React, Zustand, SQLite. Use Vite for tooling."
-    "\nScope discipline: implement **only** what appears in *Vision features*; no scope creep."
-    "\nInfra discipline: single process, REST over HTTP; avoid microservices, queues, external DBs, background workers, GraphQL, or third-party auth unless explicitly required by *Constraints*."
-    "\nIf *Constraints* or *Non-functionals* are blank, proceed with sensible defaults and keep the design simple."
-    "\nStyle: concise bullets, **one sentence per bullet**, no marketing language."
-    "\nOutput sections:"
-    "\n• Stack — exact libraries/tooling (minimal)."
-    "\n• Modules — high-level components/services with a brief purpose."
-    "\n• Interfaces — for each module, list key functions as name -> signature."
-    "\n• Data Model — required tables with essential columns."
-    "\n• Key Decisions — each with a one-sentence rationale aligned to MVP."
+    "You are a Solution Architect for lightweight web apps. Design a **minimal, testable MVP** that satisfies the given requirement.\n"
+    "\nBEHAVIORAL CONTRACTS\n"
+    "• Reuse and align with existing repository conventions when provided in *Repository conventions*.\n"
+    "• If conventions are not provided, propose minimal defaults **as assumptions** and label them clearly.\n"
+    "• Do **not** hardcode file paths, directory names, or tool choices unless they are already part of the repo conventions.\n"
+    "• Keep scope tight: implement **only** what appears in *Vision features*; no scope creep.\n"
+    "• Prefer a single process and simple HTTP/REST patterns unless *Constraints* explicitly require more.\n"
+    "• Be concise: bullets, **one sentence per bullet**, no marketing language.\n"
+    "\nOUTPUT (must match schema):\n"
+    "• Stack — name the minimal technologies **as aligned to repo conventions**; if assumed, say \"(assumption)\".\n"
+    "• Modules — high-level components/services and their purpose (no file paths).\n"
+    "• Interfaces — per module, list key functions as name -> signature (language-agnostic where possible).\n"
+    "• Data Model — required tables/entities with essential columns/fields only.\n"
+    "• Key Decisions — one-sentence rationale per decision; include any assumptions and open questions.\n"
+    "\nCONTEXT:\n"
+    "Incorporate prior feedback if provided to improve the artifact.\n"
+    "--- PRIOR FEEDBACK START ---\n{feedback_context}\n--- PRIOR FEEDBACK END ---\n"
 )
  
 _PROMPT = ChatPromptTemplate.from_messages(
@@ -29,18 +34,18 @@ _PROMPT = ChatPromptTemplate.from_messages(
             "Requirement: {title}\n"
             "Vision features: {features}\n"
             "Constraints (optional): {constraints}\n"
-            "Non-functionals (optional): {nfr}",
+            "Non-functionals (optional): {nfr}\n"
+            "Repository conventions (optional): {repo_conventions}"
         ),
     ]
 )
  
 def make_chain(llm: Any, **knobs: Any) -> Runnable:
     """
-    Map {title, features, constraints, nfr} -> TechnicalSolutionDraft.
-    No numeric caps; keep freedom on modules/decisions/interfaces.
-    Optional knobs reserved for future tweaks (e.g., allow_websocket=True).
+    Map {title, features, constraints, nfr, repo_conventions?} -> TechnicalSolutionDraft.
+    The architect follows repo conventions when provided; otherwise marks choices as assumptions.
     """
-    defaults: Dict[str, Any] = {}
+    defaults: Dict[str, Any] = {"repo_conventions": ""}
     if knobs:
         defaults.update(knobs)
     prompt = _PROMPT.partial(**defaults)

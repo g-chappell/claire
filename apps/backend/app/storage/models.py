@@ -41,6 +41,8 @@ class TaskORM(Base):
     story_id: Mapped[str] = mapped_column(ForeignKey("stories.id", ondelete="CASCADE"))
     title: Mapped[str] = mapped_column(String(200))
     definition_of_done: Mapped[list] = mapped_column(JSON, default=list)
+    feedback_human: Mapped[str | None] = mapped_column(Text, nullable=True)
+    feedback_ai: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class AcceptanceORM(Base):
@@ -94,6 +96,9 @@ class EpicORM(Base):
     title: Mapped[str] = mapped_column(String(200))
     description: Mapped[str] = mapped_column(Text, default="")
     priority_rank: Mapped[int] = mapped_column(Integer)
+    feedback_human: Mapped[str | None] = mapped_column(Text, nullable=True)
+    feedback_ai: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     __table_args__ = (
         Index("ix_epics_run_rank", "run_id", "priority_rank"),
     )
@@ -110,5 +115,7 @@ class StoryORM(Base):
     description: Mapped[str] = mapped_column(Text, default="")
     priority_rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
     tests: Mapped[list] = mapped_column(JSON, default=list)
-# relationships (optional)
-# epic: Mapped[EpicORM] = relationship(backref="stories")
+    feedback_human: Mapped[str | None] = mapped_column(Text, nullable=True)
+    feedback_ai: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # relationships (optional)
+    # epic: Mapped[EpicORM] = relationship(backref="stories")
