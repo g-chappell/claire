@@ -25,6 +25,11 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+class _InsertTextArgs(BaseModel):
+    relative_path: str
+    name_path: str
+    text_to_insert: str
+
 def _resolve_executable(cmd0: str) -> str:
     """
     Return an absolute path to the executable or raise a friendly error.
@@ -63,6 +68,7 @@ async def get_serena_tools(request: Request, project_dir: Optional[str] = None) 
 
     # Build connections map for MultiServerMCPClient
     connections: Dict[str, Dict[str, Any]] = {}
+    spawn_cmd: Optional[List[str]] = None
 
     if transport == "stdio":
         exe = _resolve_executable(getattr(settings, "SERENA_COMMAND", "uvx") or "uvx")
@@ -88,6 +94,7 @@ async def get_serena_tools(request: Request, project_dir: Optional[str] = None) 
             base_args += ["--context", ctx]
 
         logger.info("Starting Serena MCP (stdio): %s %s", exe, " ".join(base_args))
+        spawn_cmd = [exe, *base_args]
         connections["serena"] = {"transport": "stdio", "command": exe, "args": base_args}
 
     elif transport == "streamable_http":
@@ -181,6 +188,285 @@ async def get_serena_tools(request: Request, project_dir: Optional[str] = None) 
                     )
                 )
             # ---------------------------------------------
+            
+
+
+            # ---- Patch: normalize symbol tools + safe fallbacks ----------------
+            def _get(name: str) -> Optional[BaseTool]:
+                return next((t for t in tools if getattr(t, "name", "") == name), None)
+
+            def _normalize_name_path(name_path: str) -> str:
+                # Accept dotted or slashed paths; normalize to slash
+                np = (name_path or "").strip()
+                np = np.replace("\\", "/").replace("//", "/").replace(".", "/")
+                return np.strip("/")
+
+            # one place to call MCP tools regardless of arun/ainvoke/invoke/run
+            async def _call(tool: Optional[BaseTool], payload: dict):
+                if tool is None:
+                    # bubble up a clear error early; this also satisfies the type checker
+                    raise RuntimeError(f"Requested tool is not available. payload={payload}")
+                if hasattr(tool, "ainvoke"):
+                    return await getattr(tool, "ainvoke")(payload)  # type: ignore
+                if hasattr(tool, "arun"):
+                    return await getattr(tool, "arun")(payload)     # type: ignore
+                if hasattr(tool, "invoke"):
+                    return getattr(tool, "invoke")(payload)         # type: ignore
+                if hasattr(tool, "run"):
+                    return getattr(tool, "run")(payload)            # type: ignore
+                raise RuntimeError(f"Tool {getattr(tool,'name','')} has no callable interface")
+
+            _find_symbol = _get("find_symbol")
+            _replace_symbol_body = _get("replace_symbol_body")
+            _get_symbols_overview = _get("get_symbols_overview")
+            _insert_after_symbol = _get("insert_after_symbol")
+            _insert_before_symbol = _get("insert_before_symbol")
+            _rename_symbol = _get("rename_symbol")
+            _find_refs = _get("find_referencing_symbols")
+
+            # ---- Wrap find_symbol to normalize name_path --------------------------------
+            if _find_symbol:
+                tools = [t for t in tools if getattr(t, "name", "") != "find_symbol"]
+
+                class _FindArgs(BaseModel):
+                    name_path: str
+                    relative_path: Optional[str] = Field(None, description="Optional file to constrain the search")
+                    include_body: Optional[bool] = False
+                    depth: Optional[int] = 0
+
+                async def _find_symbol_safe(
+                    name_path: str,
+                    relative_path: Optional[str] = None,
+                    include_body: Optional[bool] = False,
+                    depth: Optional[int] = 0,
+                ):
+                    np = _normalize_name_path(name_path)
+                    payload = {"name_path": np, "include_body": bool(include_body), "depth": int(depth or 0)}
+                    if relative_path:
+                        payload["relative_path"] = relative_path
+                    return await _call(_find_symbol, payload)
+
+                tools.append(
+                    StructuredTool.from_function(
+                        func=_find_symbol_safe,
+                        name="find_symbol",
+                        description="Find a symbol by normalized name_path; accepts dotted or slashed paths.",
+                        args_schema=_FindArgs,
+                    )
+                )
+
+            # ---- Wrap insert_after_symbol to normalize name_path ------------------------
+            if _insert_after_symbol:
+                tools = [t for t in tools if getattr(t, "name", "") != "insert_after_symbol"]
+
+                async def _insert_after_symbol_safe(relative_path: str, name_path: str, text_to_insert: str):
+                    np = _normalize_name_path(name_path)
+                    return await _call(_insert_after_symbol, {
+                        "relative_path": relative_path,
+                        "name_path": np,
+                        "text_to_insert": text_to_insert,
+                    })
+
+                tools.append(
+                    StructuredTool.from_function(
+                        func=_insert_after_symbol_safe,
+                        name="insert_after_symbol",
+                        description="Insert text after a normalized symbol path.",
+                        args_schema=_InsertTextArgs,
+                    )
+                )
+
+            # ---- Wrap insert_before_symbol to normalize name_path -----------------------
+            if _insert_before_symbol:
+                tools = [t for t in tools if getattr(t, "name", "") != "insert_before_symbol"]
+
+                async def _insert_before_symbol_safe(relative_path: str, name_path: str, text_to_insert: str):
+                    np = _normalize_name_path(name_path)
+                    return await _call(_insert_before_symbol, {
+                        "relative_path": relative_path,
+                        "name_path": np,
+                        "text_to_insert": text_to_insert,
+                    })
+
+                tools.append(
+                    StructuredTool.from_function(
+                        func=_insert_before_symbol_safe,
+                        name="insert_before_symbol",
+                        description="Insert text before a normalized symbol path.",
+                        args_schema=_InsertTextArgs,  # reuse same schema
+                    )
+                )
+
+            # ---- Wrap replace_symbol_body with preflight + fallbacks --------------------
+            if _replace_symbol_body:
+                tools = [t for t in tools if getattr(t, "name", "") != "replace_symbol_body"]
+
+                class _ReplaceArgs(BaseModel):
+                    relative_path: str
+                    name_path: str
+                    new_body: str
+
+                async def _replace_symbol_body_safe(relative_path: str, name_path: str, new_body: str):
+                    np = _normalize_name_path(name_path)
+
+                    # Preflight: does symbol exist?
+                    symbol_exists = False
+                    if _find_symbol:
+                        try:
+                            res = await _call(_find_symbol, {
+                                "relative_path": relative_path,
+                                "name_path": np,
+                                "include_body": False,
+                                "depth": 0,
+                            })
+                            candidates = res.get("symbols") if isinstance(res, dict) else res
+                            symbol_exists = bool(candidates)
+                        except Exception as e:
+                            logger.warning("find_symbol probe failed: %s", e)
+
+                    # Fast path if it exists
+                    if symbol_exists:
+                        try:
+                            return await _call(_replace_symbol_body, {
+                                "relative_path": relative_path,
+                                "name_path": np,
+                                "new_body": new_body,
+                            })
+                        except Exception as e:
+                            logger.warning("replace_symbol_body failed despite symbol existing: %s", e)
+
+                    # Fallbacks…
+                    text_to_insert = f"\n{new_body}\n"
+
+                    # After last top-level symbol
+                    last_name_path: Optional[str] = None
+                    if _get_symbols_overview:
+                        try:
+                            ov = await _call(_get_symbols_overview, {"relative_path": relative_path})
+                            syms = ov.get("symbols") if isinstance(ov, dict) else ov
+                            if isinstance(syms, list) and syms:
+                                last = syms[-1]
+                                last_name_path = last.get("name_path") if isinstance(last, dict) else None
+                        except Exception as e:
+                            logger.warning("get_symbols_overview failed: %s", e)
+
+                    if last_name_path and _insert_after_symbol:
+                        try:
+                            return await _call(_insert_after_symbol, {
+                                "relative_path": relative_path,
+                                "name_path": last_name_path,
+                                "text_to_insert": text_to_insert,
+                            })
+                        except Exception as e:
+                            logger.warning("insert_after_symbol fallback failed: %s", e)
+
+                    # Before first top-level symbol
+                    if _get_symbols_overview and _insert_before_symbol:
+                        try:
+                            ov = await _call(_get_symbols_overview, {"relative_path": relative_path})
+                            syms = ov.get("symbols") if isinstance(ov, dict) else ov
+                            if isinstance(syms, list) and syms:
+                                first = syms[0]
+                                first_np = first.get("name_path") if isinstance(first, dict) else None
+                                if first_np:
+                                    return await _call(_insert_before_symbol, {
+                                        "relative_path": relative_path,
+                                        "name_path": first_np,
+                                        "text_to_insert": text_to_insert,
+                                    })
+                        except Exception as e:
+                            logger.warning("insert_before_symbol fallback failed: %s", e)
+
+                    # Append at EOF
+                    _append = _get("replace_regex") or None
+                    _read_file = _get("read_file") or None
+                    if _append and _read_file:
+                        try:
+                            try:
+                                await _call(_read_file, {"relative_path": relative_path})
+                            except Exception:
+                                _create = _get("create_text_file")
+                                if _create:
+                                    await _call(_create, {"relative_path": relative_path, "content": ""})
+
+                            await _call(_append, {
+                                "relative_path": relative_path,
+                                "regex": r"\Z",
+                                "replacement": f"\n{new_body}\n",
+                                "allow_multiple_occurrences": False
+                            })
+                            return {"status": "ok", "fallback": "append_eof"}
+                        except Exception as e:
+                            logger.warning("append_eof fallback failed: %s", e)
+
+                    raise RuntimeError(
+                        f"Symbol '{np}' not found in {relative_path}; replace failed and fallbacks could not insert."
+                    )
+
+                tools.append(
+                    StructuredTool.from_function(
+                        func=_replace_symbol_body_safe,
+                        name="replace_symbol_body",
+                        description=(
+                            "Replace the body of a symbol by normalized name_path. "
+                            "If the symbol is missing, falls back to a safe insert in the file."
+                        ),
+                        args_schema=_ReplaceArgs,
+                    )
+                )
+
+            # ---- Wrap rename_symbol to normalize name_path ------------------------------
+            if _rename_symbol:
+                tools = [t for t in tools if getattr(t, "name", "") != "rename_symbol"]
+
+                class _RenameArgs(BaseModel):
+                    relative_path: str
+                    name_path: str
+                    new_name: str
+
+                async def _rename_symbol_safe(relative_path: str, name_path: str, new_name: str):
+                    np = _normalize_name_path(name_path)
+                    return await _call(_rename_symbol, {
+                        "relative_path": relative_path,
+                        "name_path": np,
+                        "new_name": new_name,
+                    })
+
+                tools.append(
+                    StructuredTool.from_function(
+                        func=_rename_symbol_safe,
+                        name="rename_symbol",
+                        description="Rename a symbol (normalized name_path).",
+                        args_schema=_RenameArgs,
+                    )
+                )
+
+            # ---- Wrap find_referencing_symbols to normalize name_path -------------------
+            if _find_refs:
+                tools = [t for t in tools if getattr(t, "name", "") != "find_referencing_symbols"]
+
+                class _FindRefsArgs(BaseModel):
+                    name_path: str
+                    relative_path: Optional[str] = None
+
+                async def _find_referencing_symbols_safe(name_path: str, relative_path: Optional[str] = None):
+                    np = _normalize_name_path(name_path)
+                    payload = {"name_path": np}
+                    if relative_path:
+                        payload["relative_path"] = relative_path
+                    return await _call(_find_refs, payload)
+
+                tools.append(
+                    StructuredTool.from_function(
+                        func=_find_referencing_symbols_safe,
+                        name="find_referencing_symbols",
+                        description="Find references to a symbol (normalized name_path).",
+                        args_schema=_FindRefsArgs,
+                    )
+                )
+            # ---------------------------------------------------------------------------
+
+
 
             if tools:
                 return tools
@@ -191,7 +477,8 @@ async def get_serena_tools(request: Request, project_dir: Optional[str] = None) 
 
     raise RuntimeError(
         "Serena MCP connection failed/exposed no allowed tools. "
-        f"cmd={' '.join(cmd)} | project={project} | context={ctx} | transport={transport}. Last error: {last_err}"
+        f"cmd={' '.join(spawn_cmd or cmd)} | project={project} | context={ctx} | transport={transport}. "
+        f"Last error: {last_err}"
     )
 
 
