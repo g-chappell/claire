@@ -17,7 +17,7 @@ from app.core.planner import (
     generate_vision_solution,
     finalise_plan,
 )
-from app.storage.models import ProductVisionORM, TechnicalSolutionORM, RunManifestORM, RequirementORM
+from app.storage.models import ProductVisionORM, TechnicalSolutionORM, EpicORM, StoryORM, TaskORM, RunManifestORM, RequirementORM
 
 from app.core.runs import clear_plan_artifacts
 
@@ -26,6 +26,10 @@ from app.core.runs import clear_plan_artifacts
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+class FeedbackPatch(BaseModel):
+    feedback_human: Optional[str] = None
+    feedback_ai: Optional[str] = None
 
 @router.post("/runs/{run_id}/plan", response_model=PlanBundle)
 def post_plan(run_id: str, force: bool = False, db: Session = Depends(get_db)):
@@ -206,3 +210,70 @@ def post_finalise(
     except Exception:
         logger.exception("finalise failed")
         raise HTTPException(status_code=500, detail="finalise failed")
+    
+# ---- Product Vision feedback (persists inside pv.data) ----
+@router.put("/runs/{run_id}/plan/vision/feedback")
+def put_pv_feedback(run_id: str, payload: FeedbackPatch, db: Session = Depends(get_db)):
+    pv = db.query(ProductVisionORM).filter_by(run_id=run_id).first()
+    if not pv:
+        raise HTTPException(status_code=404, detail="product_vision not found")
+    data = dict(pv.data or {})
+    if payload.feedback_human is not None:
+        data["feedback_human"] = payload.feedback_human
+    if payload.feedback_ai is not None:
+        data["feedback_ai"] = payload.feedback_ai
+    pv.data = data
+    db.add(pv); db.commit()
+    return pv.data
+
+# ---- Technical Solution feedback (persists inside ts.data) ----
+@router.put("/runs/{run_id}/plan/solution/feedback")
+def put_ts_feedback(run_id: str, payload: FeedbackPatch, db: Session = Depends(get_db)):
+    ts = db.query(TechnicalSolutionORM).filter_by(run_id=run_id).first()
+    if not ts:
+        raise HTTPException(status_code=404, detail="technical_solution not found")
+    data = dict(ts.data or {})
+    if payload.feedback_human is not None:
+        data["feedback_human"] = payload.feedback_human
+    if payload.feedback_ai is not None:
+        data["feedback_ai"] = payload.feedback_ai
+    ts.data = data
+    db.add(ts); db.commit()
+    return ts.data
+
+# ---- Epic / Story / Task feedback (columnar overwrite) ----
+@router.put("/runs/{run_id}/plan/epics/{epic_id}/feedback")
+def put_epic_feedback(run_id: str, epic_id: str, payload: FeedbackPatch, db: Session = Depends(get_db)):
+    row = db.query(EpicORM).filter_by(run_id=run_id, id=epic_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="epic not found")
+    if payload.feedback_human is not None:
+        row.feedback_human = payload.feedback_human
+    if payload.feedback_ai is not None:
+        row.feedback_ai = payload.feedback_ai
+    db.add(row); db.commit()
+    return {"id": row.id, "feedback_human": row.feedback_human, "feedback_ai": row.feedback_ai}
+
+@router.put("/runs/{run_id}/plan/stories/{story_id}/feedback")
+def put_story_feedback(run_id: str, story_id: str, payload: FeedbackPatch, db: Session = Depends(get_db)):
+    row = db.query(StoryORM).filter_by(run_id=run_id, id=story_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="story not found")
+    if payload.feedback_human is not None:
+        row.feedback_human = payload.feedback_human
+    if payload.feedback_ai is not None:
+        row.feedback_ai = payload.feedback_ai
+    db.add(row); db.commit()
+    return {"id": row.id, "feedback_human": row.feedback_human, "feedback_ai": row.feedback_ai}
+
+@router.put("/runs/{run_id}/plan/tasks/{task_id}/feedback")
+def put_task_feedback(run_id: str, task_id: str, payload: FeedbackPatch, db: Session = Depends(get_db)):
+    row = db.query(TaskORM).filter_by(run_id=run_id, id=task_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="task not found")
+    if payload.feedback_human is not None:
+        row.feedback_human = payload.feedback_human
+    if payload.feedback_ai is not None:
+        row.feedback_ai = payload.feedback_ai
+    db.add(row); db.commit()
+    return {"id": row.id, "feedback_human": row.feedback_human, "feedback_ai": row.feedback_ai}

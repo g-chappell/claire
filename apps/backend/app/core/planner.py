@@ -64,7 +64,7 @@ def generate_vision_solution(db: Session, run_id: str, rag_context: str | None =
         non_functionals=req.non_functionals or [],
     )
 
-    pv, ts = pm.plan_vision_solution(p_req.model_dump())
+    pv, ts = pm.plan_vision_solution(p_req.model_dump(), db=db, run_id=run_id)
     _persist_vision_solution(db, run_id, pv, ts)
     return pv, ts
 
@@ -127,7 +127,7 @@ def finalise_plan(db: Session, run_id: str,
     )
 
     # Generate remaining artefacts and persist full bundle
-    bundle = pm.plan_remaining(p_req.model_dump(), pv, ts)
+    bundle = pm.plan_remaining(p_req.model_dump(), pv, ts, db=db, run_id=run_id)
     _persist_plan(db, run_id, req, bundle)
     return bundle
 
@@ -252,7 +252,7 @@ def plan_run(db: Session, run_id: str) -> PlanBundle:
         non_functionals=req.non_functionals or [],
     )
 
-    bundle = pm.plan(p_req.model_dump())
+    bundle = pm.plan(p_req.model_dump(), db=db, run_id=run_id)
     _persist_plan(db, run_id, req, bundle)
     return bundle
 

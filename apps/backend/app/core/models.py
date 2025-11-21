@@ -23,7 +23,8 @@ class Task(BaseModel):
     title: str
     order: int = 1
     status: Literal["todo", "doing", "done"] = "todo"  # optional; will be filtered if ORM lacks this column
-
+    feedback_human: str | None = None
+    feedback_ai: str | None = None
 
 class DesignNote(BaseModel):
     id: str
@@ -40,6 +41,8 @@ class ProductVision(BaseModel):
     goals: list[str] = Field(default_factory=list)
     personas: list[str] = Field(default_factory=list)
     features: list[str] = Field(default_factory=list)
+    feedback_human: str | None = None
+    feedback_ai: str | None = None
 
 class TechnicalSolution(BaseModel):
     id: str
@@ -47,13 +50,16 @@ class TechnicalSolution(BaseModel):
     modules: list[str] = Field(default_factory=list)
     interfaces: dict[str, str] = Field(default_factory=dict)
     decisions: list[str] = Field(default_factory=list)
-
+    feedback_human: str | None = None
+    feedback_ai: str | None = None
 
 class Epic(BaseModel):
     id: str
     title: str
     description: str = ""
     priority_rank: int = Field(ge=1, description="1 = highest priority")
+    feedback_human: str | None = None
+    feedback_ai: str | None = None
 
 class Story(BaseModel): # extend exiting Story if already defined; else define
     id: str
@@ -64,6 +70,8 @@ class Story(BaseModel): # extend exiting Story if already defined; else define
     acceptance: list["AcceptanceCriteria"] = Field(default_factory=list)
     tests: list[str] = Field(default_factory=list)
     tasks: list[Task] = Field(default_factory=list)
+    feedback_human: str | None = None
+    feedback_ai: str | None = None
 
 class PlanBundle(BaseModel):
     product_vision: ProductVision

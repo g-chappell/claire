@@ -1,6 +1,13 @@
 # apps/backend/agents/meta/product_manager_llm.py
 from __future__ import annotations
 
+from sqlalchemy.orm import Session
+
+from app.storage.models import (
+    ProductVisionORM, TechnicalSolutionORM,
+    EpicORM, StoryORM, TaskORM
+)
+
 import hashlib
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Type, TypeVar, cast
 
@@ -187,6 +194,52 @@ def _guardrail_warnings(sol: TechnicalSolution) -> List[str]:
         warnings.append(f"Missing required stack items: {', '.join(sorted(missing))}.")
     return warnings
 
+def build_feedback_context_for_run(
+    db: Session,
+    run_id: str,
+    epic_title: Optional[str] = None,
+    story_title: Optional[str] = None,
+) -> str:
+    """
+    Minimal, local-only context for *this run*.
+    Later, swap to RAG to pull 'similar runs'.
+    """
+    chunks: list[str] = []
+
+    pv = db.query(ProductVisionORM).filter_by(run_id=run_id).first()
+    if pv:
+        fh = (pv.data or {}).get("feedback_human")
+        fa = (pv.data or {}).get("feedback_ai")
+        if fh or fa:
+            chunks.append(f"Product Vision feedback:\n- Human: {fh or ''}\n- AI: {fa or ''}")
+
+    ts = db.query(TechnicalSolutionORM).filter_by(run_id=run_id).first()
+    if ts:
+        fh = (ts.data or {}).get("feedback_human")
+        fa = (ts.data or {}).get("feedback_ai")
+        if fh or fa:
+            chunks.append(f"Technical Solution feedback:\n- Human: {fh or ''}\n- AI: {fa or ''}")
+
+    # Epic / Story scoping (same-run only)
+    if epic_title:
+        epic = db.query(EpicORM).filter_by(run_id=run_id, title=epic_title).first()
+        if epic and (epic.feedback_human or epic.feedback_ai):
+            chunks.append(f"Epic '{epic.title}' feedback:\n- Human: {epic.feedback_human or ''}\n- AI: {epic.feedback_ai or ''}")
+
+    if story_title:
+        story = db.query(StoryORM).filter_by(run_id=run_id, title=story_title).first()
+        if story:
+            if story.feedback_human or story.feedback_ai:
+                chunks.append(f"Story '{story.title}' feedback:\n- Human: {story.feedback_human or ''}\n- AI: {story.feedback_ai or ''}")
+            # also include any task-level feedback for this story
+            task_rows = db.query(TaskORM).filter_by(run_id=run_id, story_id=story.id).all()
+            for t in task_rows:
+                if t.feedback_human or t.feedback_ai:
+                    chunks.append(f"Task '{t.title}' feedback:\n- Human: {t.feedback_human or ''}\n- AI: {t.feedback_ai or ''}")
+
+    # conservative cap
+    text = "\n\n".join(chunks)
+    return text[:4000]
 
 # --------------------------------------------------------------------------------------
 # Orchestrator
@@ -212,11 +265,14 @@ class ProductManagerLLM:
     def plan_vision_solution(
         self,
         requirement: Dict[str, str],
+        db: Session, run_id: str,
         config: Optional[RunnableConfig] = None,
     ) -> Tuple[ProductVision, TechnicalSolution]:
         """
         Generate ProductVision and TechnicalSolution only. Use this to implement the 'gate' UX.
         """
+        fctx = build_feedback_context_for_run(db, run_id=run_id)
+
         # Vision
         v_draft: ProductVisionDraft = _invoke_typed(
             ProductVisionDraft,
@@ -227,6 +283,7 @@ class ProductManagerLLM:
                 "description": requirement.get("description", ""),
                 "constraints": requirement.get("constraints", ""),
                 "nfr": requirement.get("nfr", ""),
+                "feedback_context": fctx,
             },
             config=config,
         )
@@ -246,6 +303,7 @@ class ProductManagerLLM:
                 "features": ", ".join(vision.features),
                 "constraints": requirement.get("constraints", ""),
                 "nfr": requirement.get("nfr", ""),
+                "feedback_context": fctx,
             },
             config=config,
         )
@@ -271,11 +329,15 @@ class ProductManagerLLM:
         requirement: Dict[str, str],
         vision: ProductVision,
         solution: TechnicalSolution,
+        db: Session, run_id: str,
         config: Optional[RunnableConfig] = None,
     ) -> PlanBundle:
         """
         Given an approved ProductVision + TechnicalSolution, produce the rest of the bundle.
         """
+
+        fctx_global = build_feedback_context_for_run(db, run_id=run_id)
+
         # Requirements Analyst → Epics + Stories
         ra_draft: RAPlanDraft = _invoke_typed(
             RAPlanDraft,
@@ -285,6 +347,7 @@ class ProductManagerLLM:
                 "modules": ", ".join(solution.modules),
                 "interfaces": ", ".join(f"{k}:{v}" for k, v in (solution.interfaces or {}).items()),
                 "decisions": ", ".join(solution.decisions or []),
+                "feedback_context": fctx_global,
             },
             config=config,
         )
@@ -346,15 +409,19 @@ class ProductManagerLLM:
 
         # ---------- QA per story (acceptance/tests) ----------
         if settings.FEATURE_QA and self.qa_chain is not None:
-            qa_inputs = [
-                {
+            qa_inputs = []
+            for s in stories:
+                epic_title = next((e.title for e in epics if e.id == s.epic_id), "")
+                fctx_story = build_feedback_context_for_run(
+                    db, run_id=run_id, epic_title=epic_title, story_title=s.title
+                )
+                qa_inputs.append({
                     "title": s.title,
                     "description": s.description,
-                    "epic_title": next((e.title for e in epics if e.id == s.epic_id), ""),
+                    "epic_title": epic_title,
                     "interfaces": ", ".join(f"{k}:{v}" for k, v in (solution.interfaces or {}).items()),
-                }
-                for s in stories
-            ]
+                    "feedback_context": fctx_story,   # <-- story-specific
+                })
             try:
                 qa_results_any = self.qa_chain.batch(qa_inputs, config=config, max_concurrency=4) or [None] * len(stories)
                 qa_results: List[Optional[QASpec]] = cast(List[Optional[QASpec]], qa_results_any)
@@ -387,6 +454,7 @@ class ProductManagerLLM:
                     "decisions": ", ".join(solution.decisions or []),
                     "epic_titles": ", ".join(e.title for e in epics[:6]),
                     "story_titles": ", ".join(s.title for s in stories[:12]),
+                    "feedback_context": fctx_global,
                 },
                 config=config,
             )
@@ -424,11 +492,14 @@ class ProductManagerLLM:
         task_inputs: List[Dict[str, str]] = []
 
         for s in stories:
+            epic_title = epic_title_by_id.get(s.epic_id, "")
+            fctx_story = build_feedback_context_for_run(db, run_id=run_id, epic_title=epic_title, story_title=s.title)
             payload: Dict[str, str] = {
                 "story_title": s.title,
                 "story_description": s.description,
                 "epic_title": epic_title_by_id.get(s.epic_id, ""),
                 "interfaces": ", ".join(f"{k}:{v}" for k, v in (solution.interfaces or {}).items()),
+                "feedback_context": fctx_story,   # <-- story-specific
             }
             if settings.FEATURE_QA:
                 gherkin_block = "\n".join([ac.gherkin for ac in (s.acceptance or []) if getattr(ac, "gherkin", "")])
@@ -467,9 +538,19 @@ class ProductManagerLLM:
 
     # ---------- Convenience: full single-shot plan (kept for parity) ----------
 
-    def plan(self, requirement: Dict[str, str], config: Optional[RunnableConfig] = None) -> PlanBundle:
+    def plan(
+        self,
+        requirement: Dict[str, str],
+        db: Session,
+        run_id: str,
+        config: Optional[RunnableConfig] = None,
+    ) -> PlanBundle:
         """
-        Backwards-compatible single call that does both stages.
+        Single call that does both stages with DB-backed feedback.
         """
-        vision, solution = self.plan_vision_solution(requirement, config=config)
-        return self.plan_remaining(requirement, vision, solution, config=config)
+        vision, solution = self.plan_vision_solution(
+            requirement, db=db, run_id=run_id, config=config
+        )
+        return self.plan_remaining(
+            requirement, vision, solution, db=db, run_id=run_id, config=config
+        )

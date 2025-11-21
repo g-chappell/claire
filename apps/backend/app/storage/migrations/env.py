@@ -12,6 +12,10 @@ from app.configs.settings import get_settings
 from app.storage.db import Base
 import app.storage.models  # noqa: F401  # ensure models are imported so Base.metadata is populated
 
+from pathlib import Path
+from sqlalchemy.engine.url import make_url
+
+
 # Alembic config
 config = context.config
 settings = get_settings()
@@ -22,6 +26,41 @@ if config.config_file_name is not None:
 
 # Target metadata for autogenerate
 target_metadata = Base.metadata
+
+def _normalize_sqlite_url(url_str: str) -> str:
+    """
+    If the DB URL is SQLite and uses a relative path, rewrite it to an absolute
+    path rooted at apps/backend, and ensure the directory exists.
+    """
+    try:
+        url = make_url(url_str)
+    except Exception:
+        # If URL parsing fails, just return as-is.
+        return url_str
+
+    # Handle sqlite and sqlite+aiosqlite
+    if not url.drivername.split("+", 1)[0] == "sqlite":
+        return url_str
+
+    db_path = url.database or ""
+    if not db_path:
+        return url_str
+
+    # Resolve backend root: env.py is .../apps/backend/app/storage/migrations/env.py
+    # parents[3] -> .../apps/backend
+    backend_root = Path(__file__).resolve().parents[3]
+
+    # If relative, make absolute under backend root
+    abs_db = Path(db_path)
+    if not abs_db.is_absolute():
+        abs_db = (backend_root / db_path).resolve()
+
+    # Ensure parent dir exists
+    abs_db.parent.mkdir(parents=True, exist_ok=True)
+
+    # Replace database path in URL
+    new_url = url.set(database=str(abs_db))
+    return str(new_url)
 
 def _resolve_db_url() -> str:
     """Prefer env, then app settings, then alembic.ini. Always return a str."""
@@ -36,7 +75,8 @@ def _resolve_db_url() -> str:
             "No database URL configured. "
             "Set DATABASE_URL or define sqlalchemy.url in alembic.ini."
         )
-    return str(url)
+    # NEW: normalize sqlite relative paths to absolute and ensure dir exists
+    return _normalize_sqlite_url(str(url))
 
 
 def run_migrations_offline():
