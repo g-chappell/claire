@@ -27,7 +27,7 @@ export default function App() {
           <NavLink to="/implement" className={({isActive})=> `${link} ${isActive?active:""}`}>Implement</NavLink>
 
           <div className="mt-4 text-xs uppercase tracking-wide opacity-60 px-4">Review</div>
-          <NavLink to="/review"    className={({isActive})=> `${link} ${isActive?active:""}`}>Retrospective</NavLink>
+          <NavLink to="/retrospective"    className={({isActive})=> `${link} ${isActive?active:""}`}>Retrospective</NavLink>
 
           <div className="mt-4 text-xs uppercase tracking-wide opacity-60 px-4">Configuration</div>
           <div className="mt-4"></div>

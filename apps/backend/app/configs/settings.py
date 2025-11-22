@@ -22,6 +22,7 @@ class _Common:
     LLM_PROVIDER: Optional[str] = None
     LLM_MODEL: str = "claude-3-7-sonnet-20250219"
     TEMPERATURE: float = 0.2
+    LLM_CALL_DELAY_SECONDS: float = 5.0  # default spacing; set to 0 to disable
 
     # Feature flags (planning output)
     FEATURE_QA: bool = False             # if False, skip generating acceptance/tests
@@ -55,8 +56,18 @@ class _Common:
         "--context", "ide-assistant",
     ]
     
-    CODING_RECURSION_LIMIT: int = 60  # safe default; raise to 24–32 if needed
-    CODING_MAX_TURNS: int = 10        # optional guard for agents that support it
+    # --- Coding / Serena agent execution guards ---
+    CODING_RECURSION_LIMIT: int = 100        # LangGraph recursion ceiling
+    CODING_MAX_TURNS: int = 10               # (kept) secondary ceiling for agents that support it
+    # Loop guard (detect same tool + same args repeated)
+    CODING_LOOP_GUARD_ENABLED: bool = True
+    CODING_LOOP_WINDOW: int = 6              # look at last N tool calls
+    CODING_LOOP_MAX_SAME: int = 3            # abort if the last N are all the same call ≥ this count
+    # --- Serena LSP readiness guard ---
+    SERENA_LS_READY_MAX_WAIT_SECONDS: float = 20.0   # total time to wait
+    SERENA_LS_READY_POLL_INTERVAL_SECONDS: float = 0.75  # between polls
+    SERENA_LS_READY_REQUIRE_TOOLS: bool = True  # fail hard if LSP never ready
+
     SERENA_PROJECT_DIR: str = "./data/code"       # Fallback project dir (per-run workspace overrides)
     CODE_WORKSPACES_ROOT: str = "./data/code"  # default; override via env
 

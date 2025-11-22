@@ -1,13 +1,15 @@
 # app/api/runs_qol.py
 from __future__ import annotations
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.storage.db import get_db
-from app.storage.models import RunORM, EpicORM, StoryORM
+from app.storage.models import RunORM, EpicORM, StoryORM, TaskORM
 from app.core.planner import read_plan
+
+from app.agents.meta.scrum_master_lc import generate_ai_feedback
 
 router = APIRouter()
 
@@ -119,3 +121,67 @@ def get_stories_for_run(
         )
         for s in rows
     ]
+
+class FeedbackIn(BaseModel):
+    human: Optional[str] = None
+    ai: Optional[str] = None
+
+def _load_artefact(db: Session, kind: Literal["epic","story","task"], artefact_id: str):
+    if kind == "epic":
+        return db.get(EpicORM, artefact_id)
+    if kind == "story":
+        return db.get(StoryORM, artefact_id)
+    return db.get(TaskORM, artefact_id)
+
+@router.patch("/runs/{run_id}/{kind}/{artefact_id}/feedback")
+def patch_feedback(
+    run_id: str,
+    kind: Literal["epic","story","task"],
+    artefact_id: str,
+    body: FeedbackIn,
+    db: Session = Depends(get_db),
+):
+    obj = _load_artefact(db, kind, artefact_id)
+    if not obj or obj.run_id != run_id:
+        raise HTTPException(status_code=404, detail="Artefact not found")
+
+    changed = False
+    if body.human is not None:
+        obj.feedback_human = body.human.strip()
+        changed = True
+    if body.ai is not None:
+        obj.feedback_ai = body.ai.strip()
+        changed = True
+
+    if changed:
+        db.add(obj)
+        db.commit()
+        db.refresh(obj)
+    return {"ok": True, "id": artefact_id, "kind": kind, "human": obj.feedback_human, "ai": obj.feedback_ai}
+
+class AIFeedbackIn(BaseModel):
+    # Optional: allow passing human override; else use stored human feedback
+    human_override: Optional[str] = None
+
+@router.post("/runs/{run_id}/{kind}/{artefact_id}/feedback/ai")
+def synthesize_ai_feedback(
+    run_id: str,
+    kind: Literal["epic","story","task"],
+    artefact_id: str,
+    body: AIFeedbackIn,
+    db: Session = Depends(get_db),
+):
+    obj = _load_artefact(db, kind, artefact_id)
+    if not obj or obj.run_id != run_id:
+        raise HTTPException(status_code=404, detail="Artefact not found")
+
+    # Generate AI feedback
+    ai_text, model_used = generate_ai_feedback(
+        db, run_id=run_id, kind=kind, artefact_id=artefact_id,
+        human_feedback=body.human_override or obj.feedback_human
+    )
+    obj.feedback_ai = ai_text
+    db.add(obj)
+    db.commit()
+    db.refresh(obj)
+    return {"ok": True, "ai": obj.feedback_ai, "model": model_used}

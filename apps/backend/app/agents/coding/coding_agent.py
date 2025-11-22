@@ -11,6 +11,10 @@ from app.configs.settings import get_settings
 from app.agents.coding.serena_tools import get_serena_tools, close_serena
 from app.agents.lc.model_factory import make_chat_model  # your existing factory
 
+from collections import deque
+import json
+import asyncio
+
 FALLBACK_NO_SHELL = (
     "Shell may be unavailable. If you cannot run commands, scaffold by writing files directly:\n"
     "- create package.json with minimal scripts (dev, build, start)\n"
@@ -57,6 +61,28 @@ GENERAL RULES:
 JsonMessage = Dict[str, Any]
 MessagesInput = List[Union[AnyMessage, JsonMessage]]
 
+def _tool_signature(ev: dict) -> str:
+    """
+    Build a short, stable signature for a tool call from LC event dicts.
+    Works for on_tool_start / on_tool_end; ignores LLM/chain events.
+    """
+    event_type = ev.get("event") or ev.get("type")
+    if event_type not in ("on_tool_start", "on_tool_end"):
+        return ""
+
+    # Try to pull a tool name and its input/args in a robust way
+    name = ev.get("name") or ev.get("tool_name") or ""
+    data = ev.get("data") or {}
+    # 'input' is typical on on_tool_start; 'output' on end; fall back to kwargs-like dicts
+    payload = data.get("input") or data.get("output") or data.get("kwargs") or data.get("tool_input") or {}
+    try:
+        s = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+    except Exception:
+        s = str(payload)
+
+    # Keep signature small and stable
+    return f"{event_type}:{name}:{s}"
+
 class CodingAgent:
     def __init__(self, model: Optional[str] = None, temperature: float = 0.0):
             # keep a handle to settings for later (recursion_limit, etc.)
@@ -67,6 +93,12 @@ class CodingAgent:
 
     async def _agent_for(self, request: Request, project_dir: Optional[str]) -> Any:
         tools = await get_serena_tools(request, project_dir=project_dir)
+
+        # --- Language-server warm-up: give TS server a moment to finish initializing ---
+        warm = float(getattr(self.settings, "SERENA_LS_READY_WARMUP_SECS", 1.2))
+        if warm > 0:
+            await asyncio.sleep(warm)
+
         tools_seq: Sequence[BaseTool] = cast(Sequence[BaseTool], tools)
         agent = create_agent(
             model=cast(BaseChatModel, self.llm),
@@ -75,6 +107,7 @@ class CodingAgent:
             name="SerenaCoder",
         )
         return agent
+
 
     async def implement_task(
         self,
@@ -106,17 +139,45 @@ class CodingAgent:
         # LangGraph-compatible input (messages in state)
         state = {"messages": [HumanMessage(content=prompt)]}
 
+        # LangGraph-compatible input (messages in state)
+        state = {"messages": [HumanMessage(content=prompt)]}
+
         # Bound tool/LLM recursion (iterations)
         cfg = {"recursion_limit": int(getattr(self.settings, "CODING_RECURSION_LIMIT", 30))}
 
         events: List[Dict[str, Any]] = []
+
+        # ---- loop-guard state (simple, local, stateless across calls) ----
+        guard_enabled = bool(getattr(self.settings, "CODING_LOOP_GUARD_ENABLED", True))
+        win = int(getattr(self.settings, "CODING_LOOP_WINDOW", 6))
+        max_same = int(getattr(self.settings, "CODING_LOOP_MAX_SAME", 3))
+        recent = deque(maxlen=win)
+        aborted_reason: Optional[str] = None
+
         try:
             async for ev in agent.astream_events(cast(Any, state), config=cfg):
-                events.append(cast(Dict[str, Any], ev))
+                ev = cast(Dict[str, Any], ev)
+                events.append(ev)
+
+                if guard_enabled:
+                    sig = _tool_signature(ev)
+                    if sig:
+                        recent.append(sig)
+                        # If the last 'win' entries are all the same AND the count meets threshold, abort.
+                        if len(recent) >= max_same and len(set(recent)) == 1:
+                            aborted_reason = (
+                                f"Aborting due to loop guard: repeated identical tool call "
+                                f"'{recent[0]}' {len(recent)}× without progress."
+                            )
+                            break
+
+            # If we aborted mid-stream, return early with a clear message
+            if aborted_reason:
+                return {"output": aborted_reason, "events": events}
 
             final = await agent.ainvoke(cast(Any, state), config=cfg)
 
-            # Extract final assistant text
+            # Extract final assistant text (unchanged)
             output_text: str = ""
             msgs = final.get("messages") if isinstance(final, dict) else None
             if isinstance(msgs, list) and msgs:
@@ -130,3 +191,4 @@ class CodingAgent:
             return {"output": output_text, "events": events}
         finally:
             await close_serena(request)
+

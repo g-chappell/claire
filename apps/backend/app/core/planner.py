@@ -27,6 +27,17 @@ def _coerce_priority(p: Optional[str]) -> Priority:
 
 pm = ProductManagerLLM()
 
+# --- helpers ---------------------------------------------------------------
+
+def _columns(model) -> set[str]:
+    """Return the set of column names for an ORM model (works with Alembic/autogen too)."""
+    try:
+        return {c.key for c in sa_inspect(model).columns}
+    except Exception:
+        # Fallback for unusual table declarations
+        return set(getattr(model, "__table__").columns.keys())
+
+
 # --- NEW: persist only PV/TS (used by the stage 1 gate) ---
 def _persist_vision_solution(db: Session, run_id: str,
                              vision: ProductVision,
@@ -144,24 +155,29 @@ def _persist_plan(db: Session, run_id: str, requirement: RequirementORM, bundle:
         ))
 
     # stories + acceptance
+    story_cols = _columns(StoryORM)
     for s in bundle.stories:
-        db.merge(StoryORM(
-            id=s.id, run_id=run_id, requirement_id=requirement.id,
-            epic_id=s.epic_id, title=s.title, description=s.description,
-            priority_rank=s.priority_rank, tests=s.tests
-        ))
+        _story_kwargs: Dict[str, Any] = {
+            "id": s.id,
+            "run_id": run_id,
+            "requirement_id": requirement.id,
+            "epic_id": s.epic_id,
+            "title": s.title,
+            "description": s.description,
+        }
+        if "priority_rank" in story_cols:
+            _story_kwargs["priority_rank"] = s.priority_rank  # int OK
+        if "tests" in story_cols:
+            _story_kwargs["tests"] = s.tests  # list[str] OK
+
+        db.merge(StoryORM(**_story_kwargs))
+
         # clear then re-write acceptance entries
         db.query(AcceptanceORM).filter_by(run_id=run_id, story_id=s.id).delete(synchronize_session=False)
         for i, ac in enumerate(s.acceptance, start=1):
             db.merge(AcceptanceORM(
                 id=f"AC-{s.id}-{i}", run_id=run_id, story_id=s.id, gherkin=ac.gherkin
-            ))
-
-    def _columns(model) -> set[str]:
-        try:
-            return {c.key for c in sa_inspect(model).columns}
-        except Exception:
-            return set(getattr(model, "__table__").columns.keys())
+            ))       
 
     task_cols = _columns(TaskORM)
     dn_cols = _columns(DesignNoteORM)
@@ -174,7 +190,7 @@ def _persist_plan(db: Session, run_id: str, requirement: RequirementORM, bundle:
             "id": t.id,
             "run_id": run_id,
             "story_id": s.id,
-            "title": t.title,
+            "title": t.title or "",
         }
             if "order" in task_cols:
                 kwargs["order"] = t.order
@@ -300,9 +316,9 @@ def read_plan(db: Session, run_id: str) -> PlanBundle:
             epic_id=s.epic_id,
             title=s.title,
             description=s.description,
-            priority_rank=s.priority_rank or 1,
+            priority_rank=getattr(s, "priority_rank", 1) or 1,
             acceptance=ac_by_story.get(s.id, []),
-            tests=s.tests or [],
+            tests=getattr(s, "tests", []) or [],
         )
         for s in stories_orm
     ]
