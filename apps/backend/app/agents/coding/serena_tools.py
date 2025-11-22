@@ -204,17 +204,42 @@ async def get_serena_tools(request: Request, project_dir: Optional[str] = None) 
             # one place to call MCP tools regardless of arun/ainvoke/invoke/run
             async def _call(tool: Optional[BaseTool], payload: dict):
                 if tool is None:
-                    # bubble up a clear error early; this also satisfies the type checker
                     raise RuntimeError(f"Requested tool is not available. payload={payload}")
-                if hasattr(tool, "ainvoke"):
-                    return await getattr(tool, "ainvoke")(payload)  # type: ignore
-                if hasattr(tool, "arun"):
-                    return await getattr(tool, "arun")(payload)     # type: ignore
-                if hasattr(tool, "invoke"):
-                    return getattr(tool, "invoke")(payload)         # type: ignore
-                if hasattr(tool, "run"):
-                    return getattr(tool, "run")(payload)            # type: ignore
-                raise RuntimeError(f"Tool {getattr(tool,'name','')} has no callable interface")
+
+                # Readiness/backoff settings
+                max_retries = int(getattr(settings, "SERENA_LS_READY_MAX_RETRIES", 6))
+                base_sleep = float(getattr(settings, "SERENA_LS_READY_BASE_SLEEP", 0.75))
+
+                # Common error substrings we see while TS/LS is still spinning up
+                ls_err_markers = (
+                    "language server", "tsserver", "initialize", "index", "indexing",
+                    "not ready", "timeout waiting", "LSP", "server to become ready"
+                )
+
+                for attempt in range(max_retries + 1):
+                    try:
+                        if hasattr(tool, "ainvoke"):
+                            return await getattr(tool, "ainvoke")(payload)  # type: ignore
+                        if hasattr(tool, "arun"):
+                            return await getattr(tool, "arun")(payload)     # type: ignore
+                        if hasattr(tool, "invoke"):
+                            return getattr(tool, "invoke")(payload)         # type: ignore
+                        if hasattr(tool, "run"):
+                            return getattr(tool, "run")(payload)            # type: ignore
+                        raise RuntimeError(f"Tool {getattr(tool,'name','')} has no callable interface")
+                    except Exception as e:
+                        # If it smells like "LS not ready" and we still have retries, back off then retry
+                        err_txt = (str(e) or "").lower()
+                        if any(m in err_txt for m in ls_err_markers) and attempt < max_retries:
+                            sleep_for = base_sleep * (attempt + 1)
+                            logger.warning(
+                                "Serena tool '%s' hit LS-not-ready (%s). Retrying in %.2fs (attempt %d/%d). Payload=%r",
+                                getattr(tool, "name", ""), e, sleep_for, attempt + 1, max_retries, payload
+                            )
+                            await asyncio.sleep(sleep_for)
+                            continue
+                        # otherwise, bubble it up
+                        raise
 
             _find_symbol = _get("find_symbol")
             _replace_symbol_body = _get("replace_symbol_body")

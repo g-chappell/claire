@@ -1,8 +1,11 @@
 # apps/backend/app/agents/lc/model_factory.py
 from __future__ import annotations
 import os
+import time
+import threading
 from typing import Any, Optional, cast
 from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.callbacks.base import BaseCallbackHandler
 
 def _infer_provider() -> str:
     p = (os.getenv("LLM_PROVIDER") or "").strip().lower()
@@ -13,6 +16,25 @@ def _infer_provider() -> str:
     if os.getenv("OPENAI_API_KEY"):
         return "openai"
     raise ValueError("No provider selected. Set LLM_PROVIDER=anthropic|openai and the matching API key.")
+
+# --- Global LLM call spacing (simple process-wide gate) ---
+_LLM_RATE_LOCK = threading.Lock()
+_LAST_LLM_CALL = 0.0
+
+class GlobalLLMDelayHandler(BaseCallbackHandler):
+    def __init__(self, delay: float) -> None:
+        self.delay = max(0.0, float(delay))
+
+    def on_llm_start(self, serialized, prompts, **kwargs) -> None:  # sync callback is fine
+        if self.delay <= 0:
+            return
+        global _LAST_LLM_CALL
+        with _LLM_RATE_LOCK:
+            now = time.monotonic()
+            wait = self.delay - (now - _LAST_LLM_CALL)
+            if wait > 0:
+                time.sleep(wait)
+            _LAST_LLM_CALL = time.monotonic()
 
 def make_chat_model(
     model: Optional[str] = None,
@@ -41,6 +63,10 @@ def make_chat_model(
     env_model = os.getenv("LLM_MODEL")
     chosen = model or env_model or ("claude-3-7-sonnet-20250219" if provider == "anthropic" else "gpt-4o-mini")
 
+    # Global inter-call delay (0 = disabled)
+    delay_seconds = float(os.getenv("LLM_CALL_DELAY_SECONDS", "0"))
+    _callbacks = [GlobalLLMDelayHandler(delay_seconds)] if delay_seconds > 0 else None
+
     if provider == "anthropic":
         from langchain_anthropic import ChatAnthropic  # type: ignore
         AnthropicCls: Any = ChatAnthropic
@@ -53,6 +79,7 @@ def make_chat_model(
                     temperature=temperature,
                     max_retries=max_retries,
                     timeout=timeout,
+                    **({ "callbacks": _callbacks } if _callbacks else {}),
                 ),
             )
         except TypeError:
@@ -63,6 +90,7 @@ def make_chat_model(
                     temperature=temperature,
                     max_retries=max_retries,
                     timeout=timeout,
+                    **({ "callbacks": _callbacks } if _callbacks else {}),
                 ),
             )
 
@@ -77,6 +105,7 @@ def make_chat_model(
                 temperature=temperature,
                 max_retries=max_retries,
                 timeout=timeout,
+                **({ "callbacks": _callbacks } if _callbacks else {}),
             ),
         )
     except TypeError:
@@ -88,5 +117,6 @@ def make_chat_model(
                 temperature=temperature,
                 max_retries=max_retries,
                 request_timeout=timeout,
+                **({ "callbacks": _callbacks } if _callbacks else {}),
             ),
         )

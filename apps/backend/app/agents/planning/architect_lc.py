@@ -5,6 +5,7 @@ from typing import Any, Dict
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import Runnable
 from app.agents.lc.schemas import TechnicalSolutionDraft
+from langchain_core.language_models import BaseChatModel
  
 _SYSTEM = (
     "You are a Solution Architect for lightweight web apps. Design a **minimal, testable MVP** that satisfies the given requirement.\n"
@@ -40,7 +41,7 @@ _PROMPT = ChatPromptTemplate.from_messages(
     ]
 )
  
-def make_chain(llm: Any, **knobs: Any) -> Runnable:
+def make_chain(llm: BaseChatModel, **knobs: Any) -> Runnable:
     """
     Map {title, features, constraints, nfr, repo_conventions?} -> TechnicalSolutionDraft.
     The architect follows repo conventions when provided; otherwise marks choices as assumptions.

@@ -16,7 +16,7 @@ import type {
   VisionSolution,
 } from "../types"
 
-const BASE =
+export const BASE =
   import.meta.env.VITE_API_BASE ||
   import.meta.env.VITE_API_URL ||
   import.meta.env.NEXT_PUBLIC_API_URL ||
@@ -216,4 +216,26 @@ export async function fetchPlanBundle(runId: string): Promise<{
   function coerceArray(v: any) {
     return Array.isArray(v) ? v : v ? [v] : [];
   }
+}
+
+export type Kind = "epic" | "story" | "task";
+
+export async function patchFeedback(runId: string, kind: Kind, id: string, payload: { human?: string; ai?: string }) {
+  const res = await fetch(`${BASE}/runs/${runId}/${kind}/${id}/feedback`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(`patchFeedback failed: ${res.status}`);
+  return res.json();
+}
+
+export async function synthesizeAIFeedback(runId: string, kind: Kind, id: string, humanOverride?: string) {
+  const res = await fetch(`${BASE}/runs/${runId}/${kind}/${id}/feedback/ai`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(humanOverride ? { human_override: humanOverride } : {}),
+  });
+  if (!res.ok) throw new Error(`synthesizeAIFeedback failed: ${res.status}`);
+  return res.json();
 }
