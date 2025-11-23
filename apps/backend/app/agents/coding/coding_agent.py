@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Dict, List, Optional, Sequence, Union, cast
+from typing import Any, Dict, List, Optional, Sequence, Union, cast, AsyncIterator, Protocol, runtime_checkable
 from fastapi import Request
 
 from langchain.agents import create_agent
@@ -14,6 +14,20 @@ from app.agents.lc.model_factory import make_chat_model  # your existing factory
 from collections import deque
 import json
 import asyncio
+
+@runtime_checkable
+class _SupportsAStreamEvents(Protocol):
+    # Accept whatever the underlying runner yields (e.g., StreamEvent).
+    def astream_events(self, *args, **kwargs) -> AsyncIterator[Any]:
+        ...
+
+@runtime_checkable
+class _SupportsAInvoke(Protocol):
+    async def ainvoke(self, *args, **kwargs) -> Any:
+        ...
+
+class _AgentRunnable(_SupportsAStreamEvents, _SupportsAInvoke, Protocol):
+    pass
 
 FALLBACK_NO_SHELL = (
     "Shell may be unavailable. If you cannot run commands, scaffold by writing files directly:\n"
@@ -61,6 +75,11 @@ GENERAL RULES:
 JsonMessage = Dict[str, Any]
 MessagesInput = List[Union[AnyMessage, JsonMessage]]
 
+# --- Simple async retry helper for transient LLM failures (HTTP 500, timeouts, etc.) ---
+async def _sleep_backoff(attempt: int, base: float) -> None:
+    # exponential: base, 2*base, 4*base, ...
+    await asyncio.sleep(base * (2 ** attempt))
+
 def _tool_signature(ev: dict) -> str:
     """
     Build a short, stable signature for a tool call from LC event dicts.
@@ -91,7 +110,35 @@ class CodingAgent:
             self.llm: BaseChatModel = make_chat_model(model=model, temperature=temperature)
             # NOTE: avoid .bind(...) here because it returns a Runnable (breaks create_agent typing)
 
-    async def _agent_for(self, request: Request, project_dir: Optional[str]) -> Any:
+    async def astream_events(self, state: Dict[str, Any], config: Optional[Dict[str, Any]] = None) -> AsyncIterator[Dict[str, Any]]:
+        runnable: Optional[_SupportsAStreamEvents] = None
+        # Try common attribute names you may be using to store the graph/runnable
+        for attr in ("graph", "_graph", "agent", "_agent", "runnable", "_runnable"):
+            candidate = getattr(self, attr, None)
+            if candidate is not None and hasattr(candidate, "astream_events"):
+                runnable = cast(_SupportsAStreamEvents, candidate)
+                break
+
+        if runnable is None:
+            # As a last resort, emit a terminal event so callers don't crash.
+            yield {"event": "on_chain_end", "name": "agent", "data": {"result": {"messages": []}}}
+            return
+
+        # Normal streaming path
+        async for ev in runnable.astream_events(state, config=config or {}):
+            if isinstance(ev, dict):
+                yield ev
+            else:
+                # Best-effort coercion for TypedDict/dataclass-like events
+                try:
+                    yield dict(ev)  # Mapping or TypedDict
+                except Exception:
+                    try:
+                        yield ev.__dict__  # dataclass / object with __dict__
+                    except Exception:
+                        yield {"event": "unknown", "data": str(ev)}
+
+    async def _agent_for(self, request: Request, project_dir: Optional[str]) -> _AgentRunnable:
         tools = await get_serena_tools(request, project_dir=project_dir)
 
         # --- Language-server warm-up: give TS server a moment to finish initializing ---
@@ -125,7 +172,7 @@ class CodingAgent:
         Execute the FEWEST Serena steps to complete ONE task with full PV/TS/story context.
         Returns {output, events}.
         """
-        agent = await self._agent_for(request, project_dir=project_dir)
+        agent: _AgentRunnable = await self._agent_for(request, project_dir=project_dir)
 
         prompt = (
             f"Product Vision (summary): {product_vision}\n"
@@ -135,9 +182,6 @@ class CodingAgent:
             f"Task: {task_title}\n\n"
             "Implement ONLY this task in the fewest possible steps using Serena tools."
         )
-
-        # LangGraph-compatible input (messages in state)
-        state = {"messages": [HumanMessage(content=prompt)]}
 
         # LangGraph-compatible input (messages in state)
         state = {"messages": [HumanMessage(content=prompt)]}
@@ -155,27 +199,50 @@ class CodingAgent:
         aborted_reason: Optional[str] = None
 
         try:
-            async for ev in agent.astream_events(cast(Any, state), config=cfg):
-                ev = cast(Dict[str, Any], ev)
-                events.append(ev)
+            # --- LLM stream retries (wrap entire stream) ---
+            max_retries = int(getattr(self.settings, "CODING_LLM_RETRIES", 2))
+            retry_base = float(getattr(self.settings, "CODING_LLM_RETRY_BASE_SECS", 1.5))
 
-                if guard_enabled:
-                    sig = _tool_signature(ev)
-                    if sig:
-                        recent.append(sig)
-                        # If the last 'win' entries are all the same AND the count meets threshold, abort.
-                        if len(recent) >= max_same and len(set(recent)) == 1:
-                            aborted_reason = (
-                                f"Aborting due to loop guard: repeated identical tool call "
-                                f"'{recent[0]}' {len(recent)}× without progress."
-                            )
-                            break
+            for attempt in range(max_retries + 1):
+                try:
+                    async for ev in agent.astream_events(cast(Any, state), config=cfg):
+                        ev = cast(Dict[str, Any], ev)
+                        events.append(ev)
+
+                        if guard_enabled:
+                            sig = _tool_signature(ev)
+                            if sig:
+                                recent.append(sig)
+                                if len(recent) >= max_same and len(set(recent)) == 1:
+                                    aborted_reason = (
+                                        f"Aborting due to loop guard: repeated identical tool call "
+                                        f"'{recent[0]}' {len(recent)}× without progress."
+                                    )
+                                    break
+                    # if we finished the stream without error, break retry loop
+                    break
+                except Exception as e:
+                    if attempt >= max_retries:
+                        raise
+                    # annotate and back off, then retry the whole stream
+                    events.append({"event": "warning", "message": f"LLM stream error (attempt {attempt+1}/{max_retries+1}): {e}. Retrying..."})
+                    await _sleep_backoff(attempt, retry_base)
 
             # If we aborted mid-stream, return early with a clear message
             if aborted_reason:
                 return {"output": aborted_reason, "events": events}
 
-            final = await agent.ainvoke(cast(Any, state), config=cfg)
+            # --- Final LLM call retries (for last response assembly) ---
+            final = None
+            for attempt in range(max_retries + 1):
+                try:
+                    final = await agent.ainvoke(cast(Any, state), config=cfg)
+                    break
+                except Exception as e:
+                    if attempt >= max_retries:
+                        raise
+                    events.append({"event": "warning", "message": f"LLM final invoke error (attempt {attempt+1}/{max_retries+1}): {e}. Retrying..."})
+                    await _sleep_backoff(attempt, retry_base)
 
             # Extract final assistant text (unchanged)
             output_text: str = ""

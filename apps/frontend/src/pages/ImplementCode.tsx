@@ -47,6 +47,7 @@ type ImplementResult = {
     message?: string;
     file_changes?: any;
     tool_calls?: any[];
+    events?: any[]; // ← backend already returns LC events; we’ll parse these
   }>;
 };
 
@@ -99,6 +100,15 @@ export default function ImplementCodePage() {
   const [busy, setBusy] = useState(false);
   const [log, setLog] = useState<string[]>([]);
   const [lastResult, setLastResult] = useState<ImplementResult | null>(null);
+  const [workingStoryTitle, setWorkingStoryTitle] = useState<string>("");
+
+  // Live progress (SSE)
+  const [streaming, setStreaming] = useState(false);
+  const [currentTaskId, setCurrentTaskId] = useState<string>("");
+  const [toolCountsByTask, setToolCountsByTask] = useState<Record<string, number>>({});
+  const [latestToolByTask, setLatestToolByTask] = useState<Record<string, string>>({});
+  const [es, setEs] = useState<EventSource | null>(null);
+  
 
   // UI selections
   const [selectedEpic, setSelectedEpic] = useState<string>("");
@@ -122,6 +132,15 @@ export default function ImplementCodePage() {
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Clean up any open EventSource on unmount or when 'es' changes
+  useEffect(() => {
+    return () => {
+      if (es) {
+        try { es.close(); } catch {}
+      }
+    };
+  }, [es]);
 
   // --- Load plan when run changes (identical endpoint used by PlanView)
   useEffect(() => {
@@ -151,9 +170,10 @@ export default function ImplementCodePage() {
         setStories([]);
         setFlatTasks([]);
       } finally {
-        // reset selectors on run switch
+        // reset selectors & progress on run switch
         setSelectedEpic("");
         setSelectedStoryId("");
+        setProgressByStory({});
       }
     })();
   }, [selectedRunId]);
@@ -224,16 +244,114 @@ export default function ImplementCodePage() {
     setLog((prev) => [...prev, `${new Date().toLocaleTimeString()} — ${line}`]);
   }
 
+  function bumpToolCount(taskId: string, toolName?: string) {
+    if (!taskId) return;
+    setToolCountsByTask(prev => ({ ...prev, [taskId]: (prev[taskId] ?? 0) + 1 }));
+    if (toolName) setLatestToolByTask(prev => ({ ...prev, [taskId]: toolName }));
+  }
+
+  // When a task completes, update per-story progress immediately
+  function markTaskFinished(storyId: string, ok: boolean) {
+    if (!storyId) return;
+    setProgressByStory(prev => {
+      const cur = prev[storyId] ?? { total: (tasksByStory.get(storyId)?.length ?? 0), ok: 0, errors: 0 };
+      return {
+        ...prev,
+        [storyId]: {
+          total: cur.total,
+          ok: cur.ok + (ok ? 1 : 0),
+          errors: cur.errors + (ok ? 0 : 1),
+        },
+      };
+    });
+  }
+
   // --- Execute story / full run ---
-  async function implementStoryById(storyId: string) {
-    if (!selectedRunId || !storyId) return;
+
+  async function tryStreamStory(
+    storyId: string,
+    onSseErrorFallback: () => Promise<void>
+  ): Promise<boolean> {
+    if (!selectedRunId) return false;
+
+    // Close any previous stream before starting a new one
+    if (es) {
+      try { es.close(); } catch {}
+      setEs(null);
+    }
+
+    const url = `${API}/code/runs/${selectedRunId}/story/${encodeURIComponent(storyId)}/implement/stream`;
+
+    try {
+      const source = new EventSource(url);
+      setEs(source);
+      setStreaming(true);
+
+      // Reset per-task diagnostics for this story
+      setToolCountsByTask({});
+      setLatestToolByTask({});
+      setCurrentTaskId("");
+
+      source.onmessage = (e) => {
+        try {
+          const evt = JSON.parse(e.data);
+
+          if (evt?.event === "on_tool_start") {
+            const tId = String(evt.task_id ?? "");
+            setCurrentTaskId(tId || "");
+            bumpToolCount(tId, evt?.name);
+            appendLog(`▶ tool: ${evt?.name || "(unknown)"} on task ${tId || "?"}`);
+          } else if (evt?.event === "on_tool_end") {
+            appendLog(`✔ tool done: ${evt?.name || "(unknown)"}`);
+          } else if (evt?.event === "task_complete") {
+            const tId = String(evt.task_id ?? "");
+            const ok = !!evt?.ok;
+            markTaskFinished(storyId, ok);
+            appendLog(`✓ task ${tId || "?"} ${ok ? "OK" : "ERROR"}`);
+          } else if (evt?.event === "story_begin") {
+            appendLog(`Story started…`);
+          } else if (evt?.event === "story_end") {
+            if (evt?.result) setLastResult(evt.result);
+            appendLog(`Story finished.`);
+            try { source.close(); } catch {}
+            setStreaming(false);
+            setBusy(false);
+            setWorkingStoryTitle("");
+          } else if (evt?.event) {
+            appendLog(`event: ${evt.event}`);
+          }
+        } catch (err: any) {
+          appendLog(`Bad event payload: ${err?.message || err}`);
+        }
+      };
+
+      source.onerror = async () => {
+        appendLog("SSE failed — falling back to POST.");
+        try { source.close(); } catch {}
+        setStreaming(false);
+        // keep busy true; the fallback will conclude it
+        await onSseErrorFallback();
+      };
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+
+async function implementStoryById(storyId: string) {
+  if (!selectedRunId || !storyId) return;
     const story = stories.find((s) => (s.id || s.story_id)?.toString() === storyId);
 
     setBusy(true);
+    setWorkingStoryTitle(story?.title ?? storyId);
     setLastResult(null);
     setLog([]);
     appendLog(`Implementing story: ${story?.title ?? storyId}`);
 
+    // Try SSE first
+    const doPostFallback = async () => {
     try {
       const res = await fetch(
         `${API}/code/runs/${selectedRunId}/story/${encodeURIComponent(storyId)}/implement`,
@@ -256,8 +374,20 @@ export default function ImplementCodePage() {
       appendLog(`Error: ${e?.message || e}`);
     } finally {
       setBusy(false);
+      setWorkingStoryTitle("");
     }
-  }
+  };
+
+const sseStarted = await tryStreamStory(storyId, doPostFallback);
+if (sseStarted) {
+  // Leave busy=true. We'll clear it on 'story_end' or in doPostFallback.
+  return;
+}
+
+// If SSE couldn't be started at all, use the same POST fallback now.
+await doPostFallback();
+}
+
 
   async function executeWholeRun() {
     if (!selectedRunId) return;
@@ -292,12 +422,40 @@ export default function ImplementCodePage() {
   const pct =
     selectedProgress.total > 0 ? Math.round((selectedProgress.ok / selectedProgress.total) * 100) : 0;
 
+    // Parse LC event stream entries for tool diagnostics
+  function summarizeTaskDiagnostics(taskResult: any) {
+    const events = Array.isArray(taskResult?.events) ? taskResult.events : [];
+    const toolStarts = events.filter((e: any) => e?.event === "on_tool_start");
+    const toolEnds = events.filter((e: any) => e?.event === "on_tool_end");
+
+    const totalToolCalls = Math.max(toolStarts.length, toolEnds.length);
+    // Try to pull a "latest tool" name from the end event; fall back to start
+    const lastEnd = toolEnds[toolEnds.length - 1];
+    const lastStart = toolStarts[toolStarts.length - 1];
+    const latestName = (lastEnd?.name || lastEnd?.tool_name || lastStart?.name || lastStart?.tool_name || "") as string;
+
+    // Optional: pull a short args preview
+    const payload =
+      lastEnd?.data?.input ??
+      lastEnd?.data?.kwargs ??
+      lastStart?.data?.input ??
+      lastStart?.data?.kwargs ??
+      undefined;
+
+    return { totalToolCalls, latestName, latestArgsPreview: payload };
+  }
+
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Implement Code</h1>
         <Badge>API: {API}</Badge>
       </div>
+        {(busy || streaming) && (
+          <div className="rounded-xl border border-amber-600 bg-amber-900/30 p-3 text-amber-200">
+            Working on: <span className="font-semibold">{workingStoryTitle || "story…"}</span>
+          </div>
+        )}
 
       <Section
         title="Select Run"
@@ -465,15 +623,59 @@ export default function ImplementCodePage() {
                 {!!t.length && (
                   <details className="mt-3">
                     <summary className="cursor-pointer select-none text-sm text-slate-300">
-                      View tasks
+                      View tasks + diagnostics
                     </summary>
-                    <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-300">
-                      {t.map((task) => (
-                        <li key={`${task.task_id || task.id || Math.random()}`}>
-                          #{task.order ?? "?"} {task.title || task.description || "(task)"}
-                        </li>
-                      ))}
-                    </ul>
+
+                    <div className="mt-2 overflow-x-auto rounded-lg border border-slate-800">
+                      <table className="min-w-full text-sm">
+                        <thead className="bg-slate-800/60 text-slate-200">
+                          <tr>
+                            <th className="px-3 py-2 text-left">#</th>
+                            <th className="px-3 py-2 text-left">Title</th>
+                            <th className="px-3 py-2 text-left">Status</th>
+                            <th className="px-3 py-2 text-left">Tool Calls</th>
+                            <th className="px-3 py-2 text-left">Latest Tool</th>
+                          </tr>
+                        </thead>
+                        <tbody className="bg-slate-900/40 text-slate-300">
+                          {t.map((task) => {
+                            const rid = lastResult?.results?.find(
+                              (r) => (r.task_id || "") === (task.task_id || task.id)
+                            );
+                            let diag = rid ? summarizeTaskDiagnostics(rid) : { totalToolCalls: 0, latestName: "" };
+                            // live overrides (while streaming)
+                            const liveCalls = toolCountsByTask[task.task_id || task.id || ""] ?? 0;
+                            const liveLatest = latestToolByTask[task.task_id || task.id || ""];
+                            if (streaming && (liveCalls > 0 || liveLatest)) {
+                              diag = {
+                                totalToolCalls: Math.max(diag.totalToolCalls, liveCalls),
+                                latestName: liveLatest || diag.latestName,
+                              };
+                            }
+                            const isLive = streaming && (currentTaskId === (task.task_id || task.id));
+                            const status = isLive ? "Working…" : rid ? (rid.error ? "Error" : "OK") : "—";
+
+                            return (
+                              <tr key={`${task.task_id || task.id || Math.random()}`} className="border-t border-slate-800">
+                                <td className="px-3 py-2">{task.order ?? "?"}</td>
+                                <td className="px-3 py-2">{task.title || task.description || "(task)"}</td>
+                                <td className="px-3 py-2">
+                                  {status === "OK" ? (
+                                    <span className="rounded-md bg-emerald-800/50 px-2 py-0.5 text-emerald-200">OK</span>
+                                  ) : status === "Error" ? (
+                                    <span className="rounded-md bg-rose-800/40 px-2 py-0.5 text-rose-200">Error</span>
+                                  ) : (
+                                    <span className="rounded-md bg-slate-800/50 px-2 py-0.5 text-slate-300">—</span>
+                                  )}
+                                </td>
+                                <td className="px-3 py-2">{diag.totalToolCalls}</td>
+                                <td className="px-3 py-2 font-mono">{diag.latestName || "—"}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
                   </details>
                 )}
               </div>
