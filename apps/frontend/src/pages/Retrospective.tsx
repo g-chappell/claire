@@ -1,13 +1,28 @@
 // apps/frontend/src/pages/Retrospective.tsx
 import { useEffect, useMemo, useState } from "react";
-import { BASE, patchFeedback, synthesizeAIFeedback, type Kind } from "../lib/api";
+import { BASE, getPlan as loadPlan, patchFeedback, synthesizeAIFeedback, type Kind } from "../lib/api";
 
 type RunLite = { id: string; title?: string };
 type Epic = { id: string; title: string; description?: string; feedback_human?: string; feedback_ai?: string };
-type Story = { id: string; epic_id?: string; title: string; description?: string; feedback_human?: string; feedback_ai?: string };
-type Task = { id: string; story_id?: string; title: string; feedback_human?: string; feedback_ai?: string };
+type Story = {
+  id: string;
+  epic_id?: string;
+  title: string;
+  description?: string;
+  feedback_human?: string;
+  feedback_ai?: string;
+};
+type Task = {
+  id: string;
+  story_id?: string;
+  title: string;
+  description?: string;
+  feedback_human?: string;
+  feedback_ai?: string;
+};
 
 export default function RetrospectivePage() {
+  // Data
   const [runs, setRuns] = useState<RunLite[]>([]);
   const [runId, setRunId] = useState("");
 
@@ -15,14 +30,21 @@ export default function RetrospectivePage() {
   const [stories, setStories] = useState<Story[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
 
+  // Filters
+  const [selectedEpicId, setSelectedEpicId] = useState<string>("");
+  const [selectedStoryIdFilter, setSelectedStoryIdFilter] = useState<string>("");
+
+  // Artefact selection
   const [kind, setKind] = useState<Kind>("epic");
   const [selectedId, setSelectedId] = useState("");
 
+  // Feedback editors
   const [human, setHuman] = useState("");
   const [ai, setAI] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
+  // Load runs
   useEffect(() => {
     (async () => {
       const r = await fetch(`${BASE}/runs`);
@@ -32,41 +54,115 @@ export default function RetrospectivePage() {
     })();
   }, []);
 
+  // Load plan bundle for run
   useEffect(() => {
     if (!runId) return;
     (async () => {
-      // load plan entities via your existing endpoints
-      const [eRes, sRes, tRes] = await Promise.all([
-        fetch(`${BASE}/plan/runs/${runId}/epics`).catch(() => null),
-        fetch(`${BASE}/plan/runs/${runId}/stories`).catch(() => null),
-        fetch(`${BASE}/plan/runs/${runId}/tasks`).catch(() => null),
-      ]);
-      const [e, s, t] = await Promise.all([
-        eRes?.ok ? eRes.json() : [],
-        sRes?.ok ? sRes.json() : [],
-        tRes?.ok ? tRes.json() : [],
-      ]);
-      setEpics(e || []);
-      setStories(s || []);
-      setTasks(t || []);
-      setSelectedId("");
-      setHuman("");
-      setAI("");
+      try {
+        const bundle = await loadPlan(runId);
+        setEpics(bundle?.epics ?? []);
+        setStories(bundle?.stories ?? []);
+        const flatTasks =
+          (bundle?.stories ?? []).flatMap((s: any) =>
+            (s.tasks ?? []).map((t: any) => ({ ...t, story_id: s.id }))
+          );
+        setTasks(flatTasks);
+
+        // Reset UI on run change
+        setSelectedEpicId("");
+        setSelectedStoryIdFilter("");
+        setSelectedId("");
+        setHuman("");
+        setAI("");
+        setMsg(null);
+      } catch (e) {
+        console.error("load plan failed", e);
+        setEpics([]); setStories([]); setTasks([]);
+      }
     })();
   }, [runId]);
 
-  const candidates = useMemo(() => {
-    if (kind === "epic") return epics.map(x => ({ id: x.id, label: x.title, human: x.feedback_human, ai: x.feedback_ai }));
-    if (kind === "story") return stories.map(x => ({ id: x.id, label: x.title, human: x.feedback_human, ai: x.feedback_ai }));
-    return tasks.map(x => ({ id: x.id, label: x.title, human: x.feedback_human, ai: x.feedback_ai }));
-  }, [kind, epics, stories, tasks]);
+  // ---------- FILTERED VIEWS ----------
+  // Epics filtered (if epic filter set, show only that one)
+  const epicsFiltered = useMemo(() => {
+    if (!selectedEpicId) return epics;
+    return epics.filter(e => e.id === selectedEpicId);
+  }, [epics, selectedEpicId]);
 
+  // Stories filtered by epic filter, then optional story filter
+  const storiesByEpic = useMemo(() => {
+    if (!selectedEpicId) return stories;
+    return stories.filter(s => (s.epic_id || "") === selectedEpicId);
+  }, [stories, selectedEpicId]);
+
+  const storiesFiltered = useMemo(() => {
+    if (!selectedStoryIdFilter) return storiesByEpic;
+    return storiesByEpic.filter(s => s.id === selectedStoryIdFilter);
+  }, [storiesByEpic, selectedStoryIdFilter]);
+
+  // Tasks filtered by story filter, else by epic filter, else all
+  const tasksByEpic = useMemo(() => {
+    if (!selectedEpicId) return tasks;
+    const allowedStoryIds = new Set(stories.filter(s => (s.epic_id || "") === selectedEpicId).map(s => s.id));
+    return tasks.filter(t => t.story_id && allowedStoryIds.has(t.story_id));
+  }, [tasks, stories, selectedEpicId]);
+
+  const tasksFiltered = useMemo(() => {
+    if (selectedStoryIdFilter) {
+      return tasks.filter(t => t.story_id === selectedStoryIdFilter);
+    }
+    return tasksByEpic;
+  }, [tasks, tasksByEpic, selectedStoryIdFilter]);
+
+  // ---------- ARTEFACT CANDIDATES (RESPECT FILTERS FOR ALL TYPES) ----------
+  const candidates = useMemo(() => {
+    if (kind === "epic") {
+      return epicsFiltered.map(x => ({ id: x.id, label: x.title, human: x.feedback_human, ai: x.feedback_ai }));
+    }
+    if (kind === "story") {
+      return storiesFiltered.map(x => ({ id: x.id, label: x.title, human: x.feedback_human, ai: x.feedback_ai }));
+    }
+    return tasksFiltered.map(x => ({ id: x.id, label: x.title, human: x.feedback_human, ai: x.feedback_ai }));
+  }, [kind, epicsFiltered, storiesFiltered, tasksFiltered]);
+
+  // Selected artefact + context
+  const selectedItem = useMemo(() => {
+    if (!selectedId) return null;
+    if (kind === "epic")  return epics.find(e => e.id === selectedId) || null;
+    if (kind === "story") return stories.find(s => s.id === selectedId) || null;
+    return tasks.find(t => t.id === selectedId) || null;
+  }, [kind, selectedId, epics, stories, tasks]);
+
+  const selectedLabel = useMemo(() => {
+    const c = candidates.find(c => c.id === selectedId);
+    return c?.label || "";
+  }, [selectedId, candidates]);
+
+  const selectedDescription = (selectedItem as any)?.description || "";
+
+  // Reset feedback boxes when selection changes
   useEffect(() => {
     const chosen = candidates.find(c => c.id === selectedId);
     setHuman(chosen?.human || "");
     setAI(chosen?.ai || "");
   }, [selectedId, candidates]);
 
+  // Counts
+  const counts = useMemo(() => {
+    const totals = {
+      epics: epics.length,
+      stories: stories.length,
+      tasks: tasks.length,
+    };
+    const filtered = {
+      epics: epicsFiltered.length,
+      stories: storiesFiltered.length,
+      tasks: tasksFiltered.length,
+    };
+    return { totals, filtered };
+  }, [epics, stories, tasks, epicsFiltered, storiesFiltered, tasksFiltered]);
+
+  // Actions
   async function saveHuman() {
     if (!runId || !selectedId) return;
     setBusy(true); setMsg(null);
@@ -95,29 +191,97 @@ export default function RetrospectivePage() {
     }
   }
 
+  // ---------- RENDER ----------
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-4">
-      <h1 className="text-2xl font-bold">Retrospective & Feedback</h1>
+      {/* Header + totals */}
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Retrospective & Feedback</h1>
+        <div className="text-sm text-slate-300 space-x-3">
+          <span>Epics: {counts.totals.epics}</span>
+          <span>Stories: {counts.totals.stories}</span>
+          <span>Tasks: {counts.totals.tasks}</span>
+        </div>
+      </div>
 
+      {/* Filters */}
       <section className="rounded-xl border border-slate-700 bg-slate-900 p-4">
-        <div className="grid gap-3 md:grid-cols-3">
+        <h2 className="mb-3 text-lg font-semibold">Filters</h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {/* Run */}
           <div>
             <div className="mb-1 text-sm text-slate-300">Run</div>
             <select
               className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-1.5 text-slate-100"
               value={runId}
-              onChange={e => setRunId(e.target.value)}
+              onChange={e => {
+                setRunId(e.target.value);
+              }}
             >
               {runs.map(r => <option key={r.id} value={r.id}>{r.id}</option>)}
             </select>
           </div>
 
+          {/* Epic filter */}
+          <div>
+            <div className="mb-1 text-sm text-slate-300">
+              Epic filter <span className="text-xs text-slate-400">(scopes stories & tasks)</span>
+            </div>
+            <select
+              className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-1.5 text-slate-100"
+              value={selectedEpicId}
+              onChange={e => {
+                setSelectedEpicId(e.target.value);
+                setSelectedStoryIdFilter("");
+                setSelectedId("");
+              }}
+            >
+              <option value="">All epics</option>
+              {epics.map(e => (
+                <option key={e.id} value={e.id}>{e.title}</option>
+              ))}
+            </select>
+            <div className="mt-1 text-xs text-slate-400">
+              Filtered — Epics: {counts.filtered.epics} • Stories: {counts.filtered.stories} • Tasks: {counts.filtered.tasks}
+            </div>
+          </div>
+
+          {/* Story filter */}
+          <div>
+            <div className="mb-1 text-sm text-slate-300">
+              Story filter <span className="text-xs text-slate-400">(scopes tasks; narrowed by epic if set)</span>
+            </div>
+            <select
+              className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-1.5 text-slate-100"
+              value={selectedStoryIdFilter}
+              onChange={e => {
+                setSelectedStoryIdFilter(e.target.value);
+                setSelectedId("");
+              }}
+            >
+              <option value="">All stories{selectedEpicId ? " in selected epic" : ""}</option>
+              {(selectedEpicId ? storiesByEpic : stories).map(s => (
+                <option key={s.id} value={s.id}>{s.title}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+      </section>
+
+      {/* Selection box (Type + Artefact) */}
+      <section className="rounded-xl border border-slate-700 bg-slate-900 p-4">
+        <h2 className="mb-3 text-lg font-semibold">Select artefact</h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {/* Artefact type */}
           <div>
             <div className="mb-1 text-sm text-slate-300">Artefact type</div>
             <select
               className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-1.5 text-slate-100"
               value={kind}
-              onChange={e => { setKind(e.target.value as Kind); setSelectedId(""); }}
+              onChange={e => {
+                setKind(e.target.value as Kind);
+                setSelectedId("");
+              }}
             >
               <option value="epic">Epic</option>
               <option value="story">Story</option>
@@ -125,7 +289,8 @@ export default function RetrospectivePage() {
             </select>
           </div>
 
-          <div>
+          {/* Artefact selector (fully respects filters) */}
+          <div className="md:col-span-2">
             <div className="mb-1 text-sm text-slate-300">Artefact</div>
             <select
               className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-1.5 text-slate-100"
@@ -135,10 +300,25 @@ export default function RetrospectivePage() {
               <option value="">—</option>
               {candidates.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
             </select>
+            <div className="mt-1 text-xs text-slate-400">
+              Showing {candidates.length} {kind}{candidates.length === 1 ? "" : "s"} (filters applied)
+            </div>
+
+            {/* Selected context panel */}
+            {selectedId && (
+              <div className="w-full mt-3 rounded-xl border border-slate-700 bg-slate-900/60 p-3">
+                <div className="mb-1 text-sm text-slate-300">Selected {kind} context</div>
+                <div className="text-slate-100 font-semibold">{selectedLabel || "(untitled)"}</div>
+                <p className="mt-2 whitespace-pre-wrap text-sm text-slate-300">
+                  {selectedDescription || "No description provided for this artefact."}
+                </p>
+              </div>
+            )}
           </div>
         </div>
       </section>
 
+      {/* Feedback editors */}
       <section className="rounded-xl border border-slate-700 bg-slate-900 p-4">
         <div className="grid gap-4 md:grid-cols-2">
           <div>

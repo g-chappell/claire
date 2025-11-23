@@ -1,10 +1,12 @@
 from __future__ import annotations
-from typing import Any, Dict, List, Optional, Union, cast
+from typing import Any, Dict, List, Optional, Union, cast, Mapping
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from fastapi.encoders import jsonable_encoder
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from pathlib import Path
-import os, json, subprocess, traceback, tempfile
+import os, json, subprocess, traceback, tempfile, asyncio
+from langchain_core.messages import HumanMessage
 
 from app.storage.db import get_db
 from app.storage.models import (
@@ -17,8 +19,6 @@ from app.agents.coding.serena_tools import get_serena_tools, close_serena
 router = APIRouter(prefix="/code", tags=["coding"])
 
 # --- JSON sanitizers ----------------------------------------------------------
-from typing import Any, Mapping
-from fastapi.encoders import jsonable_encoder
 
 def _safe_json(obj: Any, *, max_len: int = 4000) -> Any:
     """Return something JSONable; fallback to repr on weird types (e.g., Send)."""
@@ -48,6 +48,9 @@ def _only_known_keys(d: Mapping[str, Any]) -> dict:
         out["result"] = _safe_json(d)
     return out
 # ----------------------------------------------------------------------------- 
+def _sse(data: dict) -> bytes:
+    # Minimal SSE format: one “data:” line + blank line
+    return f"data: {json.dumps(data, default=str)}\n\n".encode("utf-8")
 
 def _workspace_root() -> Path:
     """
@@ -238,6 +241,114 @@ async def implement_story(run_id: str, story_id: str, request: Request, db: Sess
 
     return jsonable_encoder({"run_id": run_id, "story_id": story_id, "results": results})
 
+@router.get("/runs/{run_id}/story/{story_id}/implement/stream")
+async def implement_story_stream(
+    run_id: str,
+    story_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """
+    SSE stream of implement progress for a single story.
+    Mirrors the POST implement behavior but yields progress events.
+    """
+    # Validate story from the DB, same as POST /implement
+    story = db.query(StoryORM).filter_by(run_id=run_id, id=story_id).first()
+    if not story:
+        raise HTTPException(status_code=404, detail="story not found")
+
+    # Reuse existing helpers from this module
+    project_dir = _ensure_workspace(run_id)
+    agent = CodingAgent()
+
+    pvs, tss = _pv_ts_strings(db, run_id)
+    epic_title = _epic_title(db, story.epic_id)
+    acc = _acceptance_text(db, run_id, story_id)
+    story_desc = acc or _as_text(story.description)
+    tasks = _tasks_for_story(db, run_id, story_id)
+
+    # You can keep agent config simple; LangGraph will use defaults you’ve set elsewhere
+    cfg = {"recursion_limit": 100}  # or read from settings if you prefer
+
+    async def gen():
+        # Prologue
+        yield _sse({"type": "stream:start", "run_id": str(run_id), "story_id": story_id})
+
+        for t in tasks:
+            if await _client_disconnected(request):
+                break
+
+            yield _sse({"type": "task:start", "task_id": getattr(t, "id", None), "title": getattr(t, "title", "")})
+
+            # Build the same prompt shape we use in implement_task
+            prompt = (
+                f"Product Vision (summary): {pvs}\n"
+                f"Technical Solution (stack/modules): {tss}\n"
+                f"Epic: {epic_title or ''}\n"
+                f"Story: {story.title or ''} — {story_desc or ''}\n"
+                f"Task: {getattr(t, 'title', '') or ''}\n\n"
+                "Implement ONLY this task in the fewest possible steps using Serena tools."
+            )
+
+            try:
+                # Create a runnable agent for this task and stream its events
+                runnable = await agent._agent_for(request, project_dir=project_dir)
+                state = {"messages": [HumanMessage(content=prompt)]}
+
+                async for ev in runnable.astream_events(cast(Any, state), config=cfg):
+                    payload = {
+                        "type": "event",
+                        "task_id": getattr(t, "id", None),
+                        "name": getattr(ev, "get", lambda *_: None)("name"),
+                        "event": getattr(ev, "get", lambda *_: None)("event"),
+                        "data": _safe_event(getattr(ev, "get", lambda *_: None)("data")),
+                    }
+                    yield _sse(payload)
+
+                yield _sse({"type": "task:done", "task_id": getattr(t, "id", None)})
+
+            except Exception as e:
+                yield _sse({
+                    "type": "task:error",
+                    "task_id": getattr(t, "id", None),
+                    "error": str(e),
+                })
+
+        yield _sse({"type": "stream:done", "run_id": str(run_id), "story_id": story_id})
+
+
+    # Important: disable buffering & advertise SSE
+    headers = {
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+    }
+    return StreamingResponse(gen(), media_type="text/event-stream", headers=headers)
+
+
+async def _client_disconnected(request: Request | None) -> bool:
+    if not request:
+        return False
+    try:
+        await asyncio.sleep(0)  # allow cancellation to propagate
+        return await request.is_disconnected()
+    except Exception:
+        return False
+
+
+def _safe_event(data):
+    """Make event payload JSON-safe and compact for the UI."""
+    try:
+        # Drop overly large blobs; trim to essentials that your UI shows
+        if isinstance(data, dict):
+            d = dict(data)
+            # Remove verbose keys if present
+            for k in ("messages", "kwargs", "serialized"):
+                d.pop(k, None)
+            return d
+        return data
+    except Exception:
+        return None
 
 @router.post("/runs/{run_id}/execute")
 async def execute_plan(
