@@ -7,6 +7,20 @@ from typing import Any, Optional, cast
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.callbacks.base import BaseCallbackHandler
 
+# --- Claude Models for reference --- 
+# haiku fastest/cheapest, sonnet for coding/more expensive, opus most expensive dont use
+# versions <4 being deprecated
+
+# claude-haiku-4-5-20251001
+# claude-sonnet-4-5-20250929  
+# claude-opus-4-1-20250805
+# claude-opus-4-20250514
+# claude-sonnet-4-20250514
+# claude-3-7-sonnet-20250219
+# claude-3-5-haiku-20241022
+# claude-3-haiku-20240307
+# claude-3-opus-20240229
+
 def _infer_provider() -> str:
     p = (os.getenv("LLM_PROVIDER") or "").strip().lower()
     if p in {"anthropic", "openai"}:
@@ -61,7 +75,7 @@ def make_chat_model(
         timeout = float(os.getenv("LLM_TIMEOUT", "60"))
 
     env_model = os.getenv("LLM_MODEL")
-    chosen = model or env_model or ("claude-3-7-sonnet-20250219" if provider == "anthropic" else "gpt-4o-mini")
+    chosen = model or env_model or ("claude-sonnet-4-5-20250929" if provider == "anthropic" else "gpt-4o-mini")
 
     # Global inter-call delay (0 = disabled)
     delay_seconds = float(os.getenv("LLM_CALL_DELAY_SECONDS", "0"))
