@@ -95,7 +95,10 @@ class EpicORM(Base):
     run_id: Mapped[str] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"))
     title: Mapped[str] = mapped_column(String(200))
     description: Mapped[str] = mapped_column(Text, default="")
-    priority_rank: Mapped[int] = mapped_column(Integer)
+    # ensure deterministic ordering exists even for legacy rows
+    priority_rank: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    # allow cross-epic dependencies (ids of other epics)
+    depends_on: Mapped[list[str]] = mapped_column(JSON, default=list)
     feedback_human: Mapped[str | None] = mapped_column(Text, nullable=True)
     feedback_ai: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -113,9 +116,16 @@ class StoryORM(Base):
     epic_id: Mapped[str] = mapped_column(ForeignKey("epics.id", ondelete="SET NULL"), nullable=True)
     title: Mapped[str] = mapped_column(String(200))
     description: Mapped[str] = mapped_column(Text, default="")
-    priority_rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # deterministic ordering within each epic
+    priority_rank: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    # story-to-story dependencies (ids of stories)
+    depends_on: Mapped[list[str]] = mapped_column(JSON, default=list)
     tests: Mapped[list] = mapped_column(JSON, default=list)
     feedback_human: Mapped[str | None] = mapped_column(Text, nullable=True)
     feedback_ai: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        Index("ix_stories_run_epic_rank", "run_id", "epic_id", "priority_rank"),
+    )
     # relationships (optional)
     # epic: Mapped[EpicORM] = relationship(backref="stories")

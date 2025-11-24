@@ -60,6 +60,12 @@ class Epic(BaseModel):
     priority_rank: int = Field(ge=1, description="1 = highest priority")
     feedback_human: str | None = None
     feedback_ai: str | None = None
+    depends_on: list[str] = []
+
+    @property
+    def order_by(self) -> int:
+        #alias used by planners/UI
+        return self.priority_rank
 
 class Story(BaseModel): # extend exiting Story if already defined; else define
     id: str
@@ -72,6 +78,11 @@ class Story(BaseModel): # extend exiting Story if already defined; else define
     tasks: list[Task] = Field(default_factory=list)
     feedback_human: str | None = None
     feedback_ai: str | None = None
+    depends_on: list[str] = []
+
+    @property
+    def order_by(self) -> int:
+        return self.priority_rank
 
 class PlanBundle(BaseModel):
     product_vision: ProductVision

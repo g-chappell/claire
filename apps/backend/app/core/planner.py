@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Dict, Optional, Literal
+from typing import Any, Dict, Optional, Literal, cast
 
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import Session
@@ -15,6 +15,9 @@ from app.storage.models import (
 )
 from app.agents.meta.product_manager_llm import ProductManagerLLM
 
+import logging
+logger = logging.getLogger(__name__)
+
 Priority = Literal["Must", "Should", "Could"]
 
 def _coerce_priority(p: Optional[str]) -> Priority:
@@ -24,6 +27,14 @@ def _coerce_priority(p: Optional[str]) -> Priority:
     if s.startswith("could"):
         return "Could"
     return "Should"
+
+TaskStatus = Literal["todo", "doing", "done"]
+
+def _coerce_task_status(v) -> TaskStatus:
+    s = str(v or "todo").lower()
+    if s not in ("todo", "doing", "done"):
+        s = "todo"
+    return cast(TaskStatus, s)
 
 pm = ProductManagerLLM()
 
@@ -36,6 +47,87 @@ def _columns(model) -> set[str]:
     except Exception:
         # Fallback for unusual table declarations
         return set(getattr(model, "__table__").columns.keys())
+    
+# --- Dependency ordering helpers --------------------------------------------
+
+from collections import defaultdict, deque
+
+def _topo_order(nodes: list, get_id, get_deps) -> list[str]:
+    """Return a stable topological order of node IDs; breaks ties by original order."""
+    id_list = [get_id(n) for n in nodes]
+    idx_map = {get_id(n): i for i, n in enumerate(nodes)}
+
+    # Build graph
+    deps = {get_id(n): list(dict.fromkeys(get_deps(n) or [])) for n in nodes}
+    indeg = defaultdict(int)
+    children = defaultdict(list)
+    for nid, ds in deps.items():
+        for d in ds:
+            if d not in idx_map:
+                # ignore unknown dependencies gracefully
+                continue
+            indeg[nid] += 1
+            children[d].append(nid)
+
+    # Kahn with stability (keep original order)
+    q = deque(sorted([nid for nid in id_list if indeg[nid] == 0], key=lambda x: idx_map[x]))
+    ordered = []
+    while q:
+        nid = q.popleft()
+        ordered.append(nid)
+        for ch in children[nid]:
+            indeg[ch] -= 1
+            if indeg[ch] == 0:
+                q.append(ch)
+        # maintain stability for tie breaks
+        q = deque(sorted(q, key=lambda x: idx_map[x]))
+
+    # If cycle, append any remaining nodes by original order
+    if len(ordered) < len(id_list):
+        remaining = [nid for nid in id_list if nid not in ordered]
+        ordered.extend(remaining)
+    return ordered
+
+
+def _apply_dependency_ordering(bundle: PlanBundle) -> PlanBundle:
+    """
+    Use depends_on to compute stable priority_rank for Epics and Stories.
+    We only fill ranks when missing or zero; if LLM provided ranks, we keep them.
+    """
+    # ---- Epics: topo order by depends_on, then assign any missing ranks ----
+    epic_order = _topo_order(
+        bundle.epics,
+        get_id=lambda e: e.id,
+        get_deps=lambda e: (getattr(e, "depends_on", []) or []),
+    )
+    if epic_order:
+        idx_map = {eid: i for i, eid in enumerate(epic_order, start=1)}
+        for e in bundle.epics:
+            if not getattr(e, "priority_rank", None) or int(getattr(e, "priority_rank") or 0) == 0:
+                e.priority_rank = idx_map.get(e.id, e.priority_rank or 0) or 0
+
+    # ---- Stories: per-epic topo order, then assign any missing ranks ----
+    from collections import defaultdict
+    by_epic: dict[str, list[Story]] = defaultdict(list)
+    for s in bundle.stories:
+        by_epic[s.epic_id].append(s)
+
+    for epic_id, group in by_epic.items():
+        story_order = _topo_order(
+            group,
+            get_id=lambda s: s.id,
+            get_deps=lambda s: (getattr(s, "depends_on", []) or []),
+        )
+        if story_order:
+            # assign only if missing
+            rank_by_id = {sid: i for i, sid in enumerate(story_order, start=1)}
+            for s in group:
+                if not getattr(s, "priority_rank", None) or int(getattr(s, "priority_rank") or 0) == 0:
+                    s.priority_rank = rank_by_id.get(s.id, s.priority_rank or 0) or 0
+
+    return bundle
+
+
 
 
 # --- NEW: persist only PV/TS (used by the stage 1 gate) ---
@@ -139,6 +231,14 @@ def finalise_plan(db: Session, run_id: str,
 
     # Generate remaining artefacts and persist full bundle
     bundle = pm.plan_remaining(p_req.model_dump(), pv, ts, db=db, run_id=run_id)
+    bundle = _apply_dependency_ordering(bundle)
+    try:
+        if any(getattr(e, "priority_rank", None) in (None, 0) for e in bundle.epics):
+            logger.debug("plan_run: filled missing epic ranks after LLM output")
+        if any(getattr(s, "priority_rank", None) in (None, 0) for s in bundle.stories):
+            logger.debug("plan_run: filled missing story ranks after LLM output")
+    except Exception:
+        pass
     _persist_plan(db, run_id, req, bundle)
     return bundle
 
@@ -148,36 +248,85 @@ def _persist_plan(db: Session, run_id: str, requirement: RequirementORM, bundle:
     db.merge(TechnicalSolutionORM(run_id=run_id, data=bundle.technical_solution.model_dump()))
 
     # epics
+    if bundle.epics:
+        # safety: only fill ranks that are still missing after dependency ordering
+        if any(getattr(e, "priority_rank", None) in (None, 0) for e in bundle.epics):
+            used = {
+                int(getattr(e, "priority_rank", 0) or 0)
+                for e in bundle.epics
+                if getattr(e, "priority_rank", None) not in (None, 0)
+            }
+            next_rank = 1
+            for e in bundle.epics:
+                if not getattr(e, "priority_rank", None) or int(getattr(e, "priority_rank") or 0) == 0:
+                    while next_rank in used:
+                        next_rank += 1
+                    e.priority_rank = next_rank
+                    used.add(next_rank)
+    epic_cols = _columns(EpicORM)
     for e in bundle.epics:
-        db.merge(EpicORM(
-            id=e.id, run_id=run_id, title=e.title,
-            description=e.description, priority_rank=e.priority_rank
-        ))
-
-    # stories + acceptance
-    story_cols = _columns(StoryORM)
-    for s in bundle.stories:
-        _story_kwargs: Dict[str, Any] = {
-            "id": s.id,
+        _epic_kwargs: Dict[str, Any] = {
+            "id": e.id,
             "run_id": run_id,
-            "requirement_id": requirement.id,
-            "epic_id": s.epic_id,
-            "title": s.title,
-            "description": s.description,
+            "title": e.title,
+            "description": e.description,
+            "priority_rank": e.priority_rank,
         }
-        if "priority_rank" in story_cols:
-            _story_kwargs["priority_rank"] = s.priority_rank  # int OK
-        if "tests" in story_cols:
-            _story_kwargs["tests"] = s.tests  # list[str] OK
+        if "depends_on" in epic_cols:
+            _epic_kwargs["depends_on"] = [str(d) for d in (getattr(e, "depends_on", []) or [])]
+        db.merge(EpicORM(**_epic_kwargs))
 
-        db.merge(StoryORM(**_story_kwargs))
+    # ---- Stories: ensure per-epic ranks exist, then persist once ----
+    by_epic_for_rank: dict[str, list[Story]] = {}
+    for s in bundle.stories:
+        by_epic_for_rank.setdefault(s.epic_id, []).append(s)
 
-        # clear then re-write acceptance entries
-        db.query(AcceptanceORM).filter_by(run_id=run_id, story_id=s.id).delete(synchronize_session=False)
-        for i, ac in enumerate(s.acceptance, start=1):
-            db.merge(AcceptanceORM(
-                id=f"AC-{s.id}-{i}", run_id=run_id, story_id=s.id, gherkin=ac.gherkin
-            ))       
+    story_cols = _columns(StoryORM)
+
+    for epic_id, group in by_epic_for_rank.items():
+        # If any rank is missing, fill only the missing ones, preserving LLM/topo ranks
+        if any(getattr(s, "priority_rank", None) in (None, 0) for s in group):
+            used = {
+                int(getattr(s, "priority_rank", 0) or 0)
+                for s in group
+                if getattr(s, "priority_rank", None) not in (None, 0)
+            }
+            next_rank = 1
+            missing = [s for s in group if getattr(s, "priority_rank", None) in (None, 0)]
+            for s in sorted(missing, key=lambda x: x.title.lower()):
+                while next_rank in used:
+                    next_rank += 1
+                s.priority_rank = next_rank
+                used.add(next_rank)
+
+        # Persist each story (sorted by rank then title for determinism)
+        for s in sorted(group, key=lambda x: (int(getattr(x, "priority_rank", 0) or 0), x.title.lower())):
+            _story_kwargs: Dict[str, Any] = {
+                "id": s.id,
+                "run_id": run_id,
+                "requirement_id": requirement.id,
+                "epic_id": s.epic_id,
+                "title": s.title,
+                "description": s.description,
+            }
+            if "priority_rank" in story_cols:
+                _story_kwargs["priority_rank"] = int(getattr(s, "priority_rank", 1) or 1)
+            if "depends_on" in story_cols:
+                _story_kwargs["depends_on"] = [str(d) for d in (getattr(s, "depends_on", []) or [])]
+
+            db.merge(StoryORM(**_story_kwargs))
+
+            # clear then re-write acceptance entries for this story (always)
+            db.query(AcceptanceORM).filter_by(
+                run_id=run_id, story_id=s.id
+            ).delete(synchronize_session=False)
+            for ac_idx, ac in enumerate(s.acceptance, start=1):
+                db.merge(AcceptanceORM(
+                    id=f"AC-{s.id}-{ac_idx}",
+                    run_id=run_id,
+                    story_id=s.id,
+                    gherkin=ac.gherkin
+                ))
 
     task_cols = _columns(TaskORM)
     dn_cols = _columns(DesignNoteORM)
@@ -193,7 +342,7 @@ def _persist_plan(db: Session, run_id: str, requirement: RequirementORM, bundle:
             "title": t.title or "",
         }
             if "order" in task_cols:
-                kwargs["order"] = t.order
+                kwargs["order"] = int(getattr(t, "order", 1) or 1)
             if "status" in task_cols:
                 kwargs["status"] = t.status
             db.merge(TaskORM(**kwargs))
@@ -269,6 +418,14 @@ def plan_run(db: Session, run_id: str) -> PlanBundle:
     )
 
     bundle = pm.plan(p_req.model_dump(), db=db, run_id=run_id)
+    bundle = _apply_dependency_ordering(bundle)
+    try:
+        if any(getattr(e, "priority_rank", None) in (None, 0) for e in bundle.epics):
+            logger.debug("plan_run: filled missing epic ranks after LLM output")
+        if any(getattr(s, "priority_rank", None) in (None, 0) for s in bundle.stories):
+            logger.debug("plan_run: filled missing story ranks after LLM output")
+    except Exception:
+        pass
     _persist_plan(db, run_id, req, bundle)
     return bundle
 
@@ -300,40 +457,49 @@ def read_plan(db: Session, run_id: str) -> PlanBundle:
             AcceptanceCriteria(story_id=r.story_id, gherkin=r.gherkin)
         )
 
-    epics = [
-        Epic(
-            id=e.id,
-            title=e.title,
-            description=e.description,
-            priority_rank=e.priority_rank,
-        )
-        for e in epics_orm
-    ]
+    epic_cols_read = {c.key for c in sa_inspect(EpicORM).columns}
+    epics = []
+    for e in epics_orm:
+        ep_kwargs: Dict[str, Any] = {
+            "id": str(getattr(e, "id")),
+            "title": str(getattr(e, "title", "")),
+            "description": str(getattr(e, "description", "")),
+            "priority_rank": int(getattr(e, "priority_rank", 1) or 1),
+        }
+        if "depends_on" in epic_cols_read:
+            deps = getattr(e, "depends_on", []) or []
+            ep_kwargs["depends_on"] = [str(d) for d in deps]
+        epics.append(Epic(**ep_kwargs))
 
-    stories = [
-        Story(
-            id=s.id,
-            epic_id=s.epic_id,
-            title=s.title,
-            description=s.description,
-            priority_rank=getattr(s, "priority_rank", 1) or 1,
-            acceptance=ac_by_story.get(s.id, []),
-            tests=getattr(s, "tests", []) or [],
-        )
-        for s in stories_orm
-    ]
+    story_cols_read = {c.key for c in sa_inspect(StoryORM).columns}
+    stories = []
+    for s in stories_orm:
+        st_kwargs: Dict[str, Any] = {
+            "id": str(getattr(s, "id")),
+            "epic_id": str(getattr(s, "epic_id")),
+            "title": str(getattr(s, "title", "")),
+            "description": str(getattr(s, "description", "")),
+            "priority_rank": int(getattr(s, "priority_rank", 1) or 1),
+            "acceptance": ac_by_story.get(str(getattr(s, "id")), []),
+            "tests": [str(t) for t in (getattr(s, "tests", []) or [])],
+        }
+        if "depends_on" in story_cols_read:
+            deps = getattr(s, "depends_on", []) or []
+            st_kwargs["depends_on"] = [str(d) for d in deps]
+        stories.append(Story(**st_kwargs))
 
     # ---- Tasks by story
     task_rows = db.query(TaskORM).filter_by(run_id=run_id).all()
     tasks_by_story: dict[str, list[Task]] = {}
     for tr in task_rows:
-        tasks_by_story.setdefault(tr.story_id, []).append(
+        sid = str(getattr(tr, "story_id"))
+        tasks_by_story.setdefault(sid, []).append(
             Task(
-                id=tr.id,
-                story_id=tr.story_id,
-                title=tr.title,
-                order=getattr(tr, "order", 1),
-                status=getattr(tr, "status", "todo"),
+                id=str(getattr(tr, "id")),
+                story_id=sid,
+                title=str(getattr(tr, "title", "")),
+                order=int(getattr(tr, "order", 1) or 1),
+                status=_coerce_task_status(getattr(tr, "status", "todo")),
             )
         )
     for s in stories:
@@ -379,6 +545,10 @@ def read_plan(db: Session, run_id: str) -> PlanBundle:
         design_notes.append(note)
 
     design_notes.sort(key=lambda dn: (dn.kind, dn.title.lower()))
+
+    # Final, stable sort of stories by epic priority then story priority, then title
+    rank_by_epic = {e.id: (e.priority_rank or 1) for e in epics}
+    stories.sort(key=lambda s: (rank_by_epic.get(s.epic_id, 1), s.priority_rank, s.title.lower()))
 
     return PlanBundle(
         product_vision=ProductVision(**pv.data),
