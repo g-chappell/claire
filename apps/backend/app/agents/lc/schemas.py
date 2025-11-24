@@ -1,7 +1,7 @@
 from __future__ import annotations
-from typing import List, Dict, Literal
+from typing import List, Dict, Literal, Optional
 from pydantic import BaseModel, Field, field_validator, ConfigDict
-import json
+import json, re
 
 MAX_NOTES, MAX_TASKS_PER_STORY = 8, 10
 
@@ -9,6 +9,51 @@ STACK_MAP = {"node.js":"node", "nodejs":"node", "reactjs":"react", "sqlite3":"sq
 
 def _strip(s: str) -> str:
     return s.strip() if isinstance(s, str) else s
+
+def _coerce_priority(v):
+    if v is None or (isinstance(v, str) and not v.strip()):
+        return None
+    try:
+        n = int(str(v).strip())
+        return max(1, n)
+    except Exception:
+        return None
+
+def _coerce_depends_before(v):
+    # Accept list, JSON list string, or comma/newline separated string.
+    if v is None:
+        return []
+    if isinstance(v, list):
+        return [str(x).strip() for x in v if str(x).strip()]
+    if isinstance(v, str):
+        s = v.strip()
+        if not s:
+            return []
+        # try JSON first
+        try:
+            obj = json.loads(s)
+            if isinstance(obj, list):
+                return [str(x).strip() for x in obj if str(x).strip()]
+        except Exception:
+            pass
+        # fallback: split on commas/newlines
+        parts = re.split(r"[,\n]+", s)
+        return [p.strip() for p in parts if p.strip()]
+    # Fallback: wrap scalars
+    return [str(v).strip()]
+
+def _dedupe_depends(v):
+    seen, out = set(), []
+    for x in v or []:
+        k = str(x).strip()
+        if not k:
+            continue
+        lk = k.lower()
+        if lk in seen:
+            continue
+        seen.add(lk)
+        out.append(k)
+    return out
 
 class LLMModel(BaseModel):
     model_config = ConfigDict(extra="ignore")  # drop unknown keys silently
@@ -87,6 +132,22 @@ class EpicDraft(LLMModel):
     @field_validator("title", "description")
     @classmethod
     def _trim(cls, v): return _strip(v)
+    priority_rank: Optional[int] = None
+    depends_on: Optional[List[str]] = None
+    @field_validator("priority_rank", mode="before")
+    @classmethod
+    def _prio(cls, v):
+        return _coerce_priority(v)
+
+    @field_validator("depends_on", mode="before")
+    @classmethod
+    def _deps_before(cls, v):
+        return _coerce_depends_before(v)
+
+    @field_validator("depends_on")
+    @classmethod
+    def _deps_after(cls, v):
+        return _dedupe_depends(v)
 
 class StoryDraft(LLMModel):
     epic_title: str
@@ -95,10 +156,27 @@ class StoryDraft(LLMModel):
     @field_validator("epic_title", "title", "description")
     @classmethod
     def _trim(cls, v): return _strip(v)
+    priority_rank: Optional[int] = None
+    depends_on: Optional[List[str]] = None
+    @field_validator("priority_rank", mode="before")
+    @classmethod
+    def _prio(cls, v):
+        return _coerce_priority(v)
+
+    @field_validator("depends_on", mode="before")
+    @classmethod
+    def _deps_before(cls, v):
+        return _coerce_depends_before(v)
+
+    @field_validator("depends_on")
+    @classmethod
+    def _deps_after(cls, v):
+        return _dedupe_depends(v)
 
 class RAPlanDraft(LLMModel):
     epics: List[EpicDraft] = Field(default_factory=list)
     stories: List[StoryDraft] = Field(default_factory=list)
+
 
 class QASpec(LLMModel):
     gherkin: List[str] = Field(default_factory=list)
@@ -163,6 +241,22 @@ class TaskDraft(LLMModel):
     @classmethod
     def _cap_items(cls, v):
         return (v or [])[:MAX_TASKS_PER_STORY]
+    priority_rank: Optional[int] = None
+    depends_on: Optional[List[str]] = None
+    @field_validator("priority_rank", mode="before")
+    @classmethod
+    def _prio(cls, v):
+        return _coerce_priority(v)
+
+    @field_validator("depends_on", mode="before")
+    @classmethod
+    def _deps_before(cls, v):
+        return _coerce_depends_before(v)
+
+    @field_validator("depends_on")
+    @classmethod
+    def _deps_after(cls, v):
+        return _dedupe_depends(v)
 
 class TechWritingBundleDraft(LLMModel):
     notes: List[DesignNoteDraft] = Field(default_factory=list)

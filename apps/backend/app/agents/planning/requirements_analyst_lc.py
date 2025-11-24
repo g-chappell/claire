@@ -22,16 +22,19 @@ Behavioral contract for stories
 • Do **not** prescribe filenames, directories, class/component names, specific libraries, or CLI/tool invocations.
 • If Proposed Solution already names interfaces/modules or conventions (e.g., REST vs. RPC, modular boundaries), use those names,
   but keep implementation details conditional on repository conventions to be resolved later by the coding agent.
+• Within each epic, use bottom-up ordering: scaffolding before UI, verification last.
+• When dependencies exist, populate depends_on with exact titles of prerequisite epics/stories.
+• Populate priority_rank to reflect intended execution order (1 = highest). Use a consistent, gap-free ranking within each epic.
 
 Output format
-• Epics: list of objects with fields: title, description.
-• Stories: list of objects with fields: epic_title, title, description.
+• Epics: list of objects with fields: title, description, priority_rank? (int, 1 = highest), depends_on? (list of epic titles).
+• Stories: list of objects with fields: epic_title, title, description, priority_rank? (int, 1 = highest within the epic), depends_on? (list of story titles).
 
 Rules
 • At least one Story per Epic.
 • Titles only (no IDs).
 • Stories must align to the epic’s increment and be implementation-ready at the behavioral level.
-• Respond ONLY with the schema expected by the tool; no extra keys.
+• Respond ONLY with the schema expected by the tool; no extra keys beyond the specified fields (including priority_rank and depends_on).
 
 CONTEXT:
 If provided, incorporate prior feedback to improve the artifact.

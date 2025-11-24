@@ -48,28 +48,28 @@ def make_tasks_chain(llm):
     """
     prompt = ChatPromptTemplate.from_messages([
         ("system",
-         "You are a Technical Writer generating the **smallest sufficient** list of atomic implementation tasks for a single story.\n"
-         "\nBEHAVIORAL CONTRACT:\n"
-         "• Minimize: use the fewest tasks needed; if the story is already satisfied, return **zero** tasks.\n"
-         "• Atomicity: one concrete outcome per task (create/update/wire/integrate/persist/handle/refactor/remove). No multi-step blends.\n"
-         "• Ordering: include only prerequisites that are truly required **for this story**; otherwise omit.\n"
-         "• Non-prescriptive: **do not** specify file paths, file extensions (.ts/.js, etc.), frameworks, libraries, tools, or commands.\n"
-         "  Defer these to existing repository conventions discovered at execution time by the coding agent.\n"
-         "• No tests/AC/BDD/design-notes/documentation here.\n"
-         "• No duplication. If two tasks overlap, keep the single most outcome-oriented one.\n"
-         "\nSTRICT OUTPUT RULES:\n"
-         "• Return **JSON ONLY** conforming to TaskDraft.\n"
-         "• story_title MUST equal the provided story_title exactly.\n"
-         "• Titles should be short outcome statements; descriptions clarify **what changes** should exist after completion, not how to implement.\n"
-         "\nPRIOR FEEDBACK (improve tasks accordingly if present):\n"
-         "--- START FEEDBACK ---\n{feedback_context}\n--- END FEEDBACK ---"),
+            "You are a Technical Writer generating the **smallest sufficient** list of atomic implementation tasks for a single story.\n"
+            "\nBEHAVIORAL CONTRACT:\n"
+            "• Minimize: use the fewest tasks needed; if the story is already satisfied, return **zero** tasks.\n"
+            "• Atomicity: one concrete outcome per task (create/update/wire/integrate/persist/handle/refactor/remove). No multi-step blends.\n"
+            "• Ordering: include only prerequisites that are truly required **for this story**; otherwise omit. When a prerequisite exists, set depends_on to the exact title(s) of those tasks.\n"
+            "• Prioritization: set priority_rank per story (1 = highest) to indicate execution order among the tasks that remain after pruning.\n"
+            "• Non-prescriptive: **do not** specify file paths, file extensions (.ts/.js, etc.), frameworks, libraries, tools, or commands.\n"
+            "\nSTRICT OUTPUT RULES:\n"
+            "• Return **JSON ONLY** conforming to TaskDraft.\n"
+            "• Required per task: title, description.\n"
+            "• Optional per task: priority_rank (int, 1 = highest), depends_on (list of task titles from the same story).\n"
+            "• story_title MUST equal the provided story_title exactly.\n"
+            "• Titles should be short outcome statements; descriptions clarify **what changes** should exist after completion, not how to implement.\n"
+            "\nPRIOR FEEDBACK (improve tasks accordingly if present):\n"
+            "--- START FEEDBACK ---\n{feedback_context}\n--- END FEEDBACK ---"),
         ("human",
-         "Story context:\n"
-         "- story_title: {story_title}\n"
-         "- description: {story_description}\n"
-         "- epic_title: {epic_title}\n"
-         "- relevant_interfaces (optional): {interfaces}\n"
-         "Return JSON ONLY."),
+            "Story context:\n"
+            "- story_title: {story_title}\n"
+            "- description: {story_description}\n"
+            "- epic_title: {epic_title}\n"
+            "- relevant_interfaces (optional): {interfaces}\n"
+            "Return JSON ONLY."),
     ])
     return prompt | llm.with_structured_output(TaskDraft)
 
