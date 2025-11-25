@@ -16,25 +16,42 @@ Principles
 • Avoid proliferation: choose the **fewest** epics/stories that satisfy the Vision.
   Soft caps (ceilings, not targets): ≤{max_epics} epics, ≤{max_stories_total} stories overall, ≤{max_stories_per_epic} per epic.
 
+Ordering (authoritative):
+• You MUST assign priority_rank (1..K, gap-free, 1 = highest) for every epic and for every story within its epic.
+• The app will NOT reorder; your ranks determine execution order.
+
+Dependencies:
+• Provide depends_on for true prerequisites.
+• For epics, depends_on is a list of other **epic titles** from this draft (use titles, not IDs).
+• For stories, depends_on is a list of other **story titles** from the same epic (use titles, not IDs).
+• When you reference another epic/story, copy its title text exactly so it can be matched (case-insensitive).
+
+Bottom-Up Build Philosophy (MANDATORY for ranking + dependencies):
+1) Scaffold & baseline (MUST be Epic #1): file structure, placeholders, module boundaries, initialization wiring.
+2) Core state & adapters: state manager, storage adapters, persistence surfaces.
+3) Controllers & cross-module event wiring.
+4) UI render pipeline & visuals.
+5) UX polish & diagnostics.
+6) Feature iterations on top of the stable base.
+
 Behavioral contract for stories
-• Each story description must state the intended behavior and an observable outcome, e.g., "Do <X>; Done when <Y is observable>".
+• Each story description states intended behavior + observable outcome (“Do <X>; Done when <Y>”).
 • Reference capabilities at the **conceptual layer** (Backend/API, Frontend/UI, Data/Storage, Tests), not concrete files or tools.
-• Do **not** prescribe filenames, directories, class/component names, specific libraries, or CLI/tool invocations.
-• If Proposed Solution already names interfaces/modules or conventions (e.g., REST vs. RPC, modular boundaries), use those names,
-  but keep implementation details conditional on repository conventions to be resolved later by the coding agent.
-• Within each epic, use bottom-up ordering: scaffolding before UI, verification last.
-• When dependencies exist, populate depends_on with exact titles of prerequisite epics/stories.
-• Populate priority_rank to reflect intended execution order (1 = highest). Use a consistent, gap-free ranking within each epic.
+• If Proposed Solution names interfaces/modules/boundaries, anchor stories to those names; keep implementation details conditional on repo conventions.
 
-Output format
-• Epics: list of objects with fields: title, description, priority_rank? (int, 1 = highest), depends_on? (list of epic titles).
-• Stories: list of objects with fields: epic_title, title, description, priority_rank? (int, 1 = highest within the epic), depends_on? (list of story titles).
-
-Rules
-• At least one Story per Epic.
-• Titles only (no IDs).
-• Stories must align to the epic’s increment and be implementation-ready at the behavioral level.
-• Respond ONLY with the schema expected by the tool; no extra keys beyond the specified fields (including priority_rank and depends_on).
+Output format (STRICT):
+   • For each epic (REQUIRED fields): title, description, priority_rank (int, 1..K), depends_on (array of epic titles in this draft; [] if none).
+   • For each story (REQUIRED fields): epic_title, title, description, priority_rank (int, 1..K within that epic), depends_on (array of story titles **from the same epic**; [] if none).
+Rules:
+   • You MUST assign a unique, gap-free priority_rank per epic and per story-in-epic.
+   • You MUST include depends_on arrays (use titles, not IDs). Cross-epic story deps are forbidden.
+   • Ordering philosophy (authoritative):
+       1) App scaffold & initialization
+       2) Core state & storage foundation
+       3) Event Controller wiring / cross-module contracts
+       4) UI render pipeline & visuals
+       5) Feature flows
+       6) UX polish / diagnostics
 
 CONTEXT:
 If provided, incorporate prior feedback to improve the artifact.

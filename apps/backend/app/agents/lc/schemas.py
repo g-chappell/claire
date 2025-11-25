@@ -132,8 +132,8 @@ class EpicDraft(LLMModel):
     @field_validator("title", "description")
     @classmethod
     def _trim(cls, v): return _strip(v)
-    priority_rank: Optional[int] = None
-    depends_on: Optional[List[str]] = None
+    priority_rank: int = Field(..., ge=1)
+    depends_on: list[str] = Field(default_factory=list)
     @field_validator("priority_rank", mode="before")
     @classmethod
     def _prio(cls, v):
@@ -156,8 +156,8 @@ class StoryDraft(LLMModel):
     @field_validator("epic_title", "title", "description")
     @classmethod
     def _trim(cls, v): return _strip(v)
-    priority_rank: Optional[int] = None
-    depends_on: Optional[List[str]] = None
+    priority_rank: int = Field(..., ge=1)
+    depends_on: list[str] = Field(default_factory=list)
     @field_validator("priority_rank", mode="before")
     @classmethod
     def _prio(cls, v):
@@ -241,8 +241,8 @@ class TaskDraft(LLMModel):
     @classmethod
     def _cap_items(cls, v):
         return (v or [])[:MAX_TASKS_PER_STORY]
-    priority_rank: Optional[int] = None
-    depends_on: Optional[List[str]] = None
+    priority_rank: int = Field(..., ge=1)
+    depends_on: list[str] = Field(default_factory=list)
     @field_validator("priority_rank", mode="before")
     @classmethod
     def _prio(cls, v):
