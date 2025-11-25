@@ -41,8 +41,17 @@ class TaskORM(Base):
     story_id: Mapped[str] = mapped_column(ForeignKey("stories.id", ondelete="CASCADE"))
     title: Mapped[str] = mapped_column(String(200))
     definition_of_done: Mapped[list] = mapped_column(JSON, default=list)
+    # NEW: deterministic ordering within a story
+    order: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    # NEW: lightweight status for UI ("todo" | "doing" | "done")
+    status: Mapped[str] = mapped_column(String(10), nullable=False, default="todo")
     feedback_human: Mapped[str | None] = mapped_column(Text, nullable=True)
     feedback_ai: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        # Helpful for listing tasks in story execution order
+        Index("ix_tasks_story_order", "run_id", "story_id", "order"),
+    )
 
 
 class AcceptanceORM(Base):

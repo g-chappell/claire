@@ -9,6 +9,8 @@ type Epic = {
   id?: string;
   title: string;
   description?: string;
+  priority_rank?: number;
+  depends_on?: string[];
 };
 
 type Task = {
@@ -24,10 +26,11 @@ type Story = {
   id?: string;
   story_id?: string;
   epic_id?: string;
-  epic_title?: string; // some older responses included this
+  epic_title?: string; // legacy
   title: string;
   description?: string;
   priority_rank?: number;
+  depends_on?: string[];   // NEW
   tasks?: Task[];
 };
 
@@ -188,6 +191,26 @@ export default function ImplementCodePage() {
     return map;
   }, [epics]);
 
+  // Rank lookup for epics
+  const epicRankById = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const e of epics) {
+      const id = String((e as any).id ?? "");
+      if (id) map[id] = (e as any).priority_rank ?? 0;
+    }
+    return map;
+  }, [epics]);
+
+  // Title lookup for stories (for pretty depends_on rendering)
+  const storyTitleById = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const s of stories) {
+      const id = String((s.id ?? s.story_id ?? "") || "");
+      if (id) map[id] = s.title;
+    }
+    return map;
+  }, [stories]);
+
   // Map of tasks per story id
   const tasksByStory = useMemo(() => {
     const m = new Map<string, Task[]>();
@@ -200,6 +223,25 @@ export default function ImplementCodePage() {
     for (const [, arr] of m) arr.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
     return m;
   }, [flatTasks]);
+
+  // --- Ordered plan views (epics then stories) ---
+  const epicsOrdered = useMemo(
+    () => (epics ?? []).slice().sort((a, b) => (a.priority_rank ?? 0) - (b.priority_rank ?? 0)),
+    [epics]
+  );
+
+  const storiesByEpicOrdered = useMemo(() => {
+    const m = new Map<string, Story[]>();
+    const orderedStories = (stories ?? []).slice().sort(
+      (a, b) => (a.priority_rank ?? 0) - (b.priority_rank ?? 0)
+    );
+    for (const s of orderedStories) {
+      const eid = (s.epic_id ?? "").toString();
+      if (!m.has(eid)) m.set(eid, []);
+      m.get(eid)!.push(s);
+    }
+    return m;
+  }, [stories]);
 
   // Selector lists
   const epicOptions = useMemo(() => epics.map((e) => ({ id: (e as any).id?.toString?.() ?? "", title: e.title })), [epics]);
@@ -445,6 +487,23 @@ await doPostFallback();
     return { totalToolCalls, latestName, latestArgsPreview: payload };
   }
 
+  function coerceTextLike(val: any): string {
+  if (typeof val === "string") {
+    // Try to extract a 'title' from python-ish dicts e.g. "{'title': '…', ...}"
+    const m = val.match(/'title'\s*:\s*'([^']+)'/);
+    if (m) return m[1];
+    try {
+      const parsed = JSON.parse(val);
+      if (parsed && typeof parsed.title === "string") return parsed.title;
+    } catch {}
+    return val;
+  }
+  if (val && typeof val === "object") {
+    return val.title ?? val.name ?? val.text ?? JSON.stringify(val);
+  }
+  return String(val ?? "");
+}
+
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-4">
       <div className="flex items-center justify-between">
@@ -590,99 +649,172 @@ await doPostFallback();
         </div>
       </Section>
 
-      <Section title="Stories (all)">
-        <div className="grid gap-3 md:grid-cols-2">
-          {storiesInEpic.map((s) => {
-            const sid = (s.id || s.story_id || "").toString();
-            const t = tasksByStory.get(sid) || [];
-            const pr = progressByStory[sid] || { total: t.length, ok: 0, errors: 0 };
+      {/* High-level execution order */}
+      <Section title="Implementation Plan">
+          <div className="overflow-x-auto rounded-xl border border-slate-800">
+            <table className="min-w-full text-sm">
+              <thead className="bg-slate-800/60 text-slate-200">
+                <tr>
+                  <th className="px-3 py-2 text-left">Order</th>
+                  <th className="px-3 py-2 text-left">Epic</th>
+                  <th className="px-3 py-2 text-left">Stories (ordered)</th>
+                </tr>
+              </thead>
+              <tbody className="bg-slate-900/40 text-slate-300">
+                {epicsOrdered.map((e, i) => {
+                  const eid = ((e as any).id ?? "").toString();
+                  const erank = (e as any).priority_rank ?? i + 1;
+                  const eDeps = Array.isArray((e as any).depends_on) ? (e as any).depends_on : [];
+                  const storiesForEpic = storiesByEpicOrdered.get(eid) || [];
+                  return (
+                    <tr key={eid || e.title} className="border-t border-slate-800 align-top">
+                      <td className="px-3 py-2">#{erank}</td>
+                      <td className="px-3 py-2">
+                        <div className="font-medium">{e.title}</div>
+                        {eDeps.length ? (
+                          <div className="mt-1 text-xs text-slate-400">
+                            Depends on: {eDeps.map((id: string) => epicTitleById[id] || id).join(", ")}
+                          </div>
+                        ) : null}
+                      </td>
+                      <td className="px-3 py-2">
+                        <div className="flex flex-wrap gap-2">
+                          {storiesForEpic.map((s) => {
+                            const sid = (s.id || s.story_id || "").toString();
+                            const sRank = (s.priority_rank ?? 0) || 0;
+                            const sDeps = Array.isArray((s as any).depends_on) ? (s as any).depends_on : [];
+                            const depsTitle = sDeps.map((id: string) => storyTitleById[id] || id).join(", ");
+                            return (
+                              <button
+                                key={`${eid}-${sid}`}
+                                className={`rounded-md border border-slate-700 px-2 py-0.5 text-xs ${
+                                  selectedStoryId === sid ? "bg-slate-700 text-slate-100" : "bg-slate-800/60 text-slate-200"
+                                }`}
+                                title={sDeps.length ? `Depends on: ${depsTitle}` : ""}
+                                onClick={() => {
+                                  setSelectedEpic(eid);
+                                  setSelectedStoryId(sid);
+                                }}
+                              >
+                                #{sRank || "?"} — {s.title}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Section>
+
+        {/* Focus view for the chosen story */}
+        <Section title="Selected Story">
+          {!selectedStoryId ? (
+            <div className="text-slate-400">Select an epic and story above to view details and implement.</div>
+          ) : (() => {
+            const s = stories.find((st) => (st.id || st.story_id)?.toString() === selectedStoryId);
+            const t = selectedTasks;
+            const pr = selectedProgress;
+            const epicName = s?.epic_title || (s?.epic_id ? epicTitleById[s.epic_id] : "");
+            const sDeps = Array.isArray((s as any)?.depends_on) ? (s as any)?.depends_on as string[] : [];
             const p = pr.total > 0 ? Math.round((pr.ok / pr.total) * 100) : 0;
-            const epicName = s.epic_title || (s.epic_id ? epicTitleById[s.epic_id] : "");
+
             return (
-              <div key={`${sid}-${s.title}`} className="rounded-xl border border-slate-700 bg-slate-900/60 p-3">
+              <div className="space-y-3">
                 <div className="mb-1 text-sm text-slate-400">{epicName}</div>
-                <div className="font-semibold">{s.title}</div>
-                {s.description && <div className="text-sm text-slate-400">{s.description}</div>}
-                <div className="mt-2 flex items-center gap-2">
+                <div className="text-xl font-semibold">{s?.title}</div>
+
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                  {s?.epic_id && epicRankById[s.epic_id] ? <Badge>Epic #{epicRankById[s.epic_id]}</Badge> : null}
+                  {typeof s?.priority_rank === "number" ? <Badge>Story #{s?.priority_rank}</Badge> : null}
+                  {sDeps.length ? (
+                    <span>
+                      Depends on: {sDeps.map((id: string) => storyTitleById[id] || id).join(", ")}
+                    </span>
+                  ) : null}
+                </div>
+
+                {s?.description && <div className="text-sm text-slate-300">{s.description}</div>}
+
+                <div className="flex items-center gap-2">
                   <Badge>Tasks: {t.length}</Badge>
                   <Badge>Done: {pr.ok}</Badge>
                   {pr.errors ? <Badge>Errors: {pr.errors}</Badge> : null}
                 </div>
-                <div className="mt-2 h-1.5 w-full overflow-hidden rounded bg-slate-800">
+                <div className="h-1.5 w-full overflow-hidden rounded bg-slate-800">
                   <div className="h-1.5 bg-emerald-500" style={{ width: `${p}%` }} />
                 </div>
-                <div className="mt-3 flex items-center gap-2">
+
+                <div>
                   <button
-                    onClick={() => implementStoryById(sid)}
-                    disabled={!selectedRunId || busy || !sid}
+                    onClick={() => implementStoryById(selectedStoryId)}
+                    disabled={!selectedRunId || busy}
                     className="rounded-xl bg-slate-800 px-3 py-1.5 text-slate-100 hover:bg-slate-700 disabled:opacity-50"
                   >
-                    Implement Story
+                    Implement Selected Story
                   </button>
                 </div>
+
                 {!!t.length && (
-                  <details className="mt-3">
-                    <summary className="cursor-pointer select-none text-sm text-slate-300">
-                      View tasks + diagnostics
-                    </summary>
+                  <div className="overflow-x-auto rounded-lg border border-slate-800">
+                    <table className="min-w-full text-sm">
+                      <thead className="bg-slate-800/60 text-slate-200">
+                        <tr>
+                          <th className="px-3 py-2 text-left">Order</th>
+                          <th className="px-3 py-2 text-left">Title</th>
+                          <th className="px-3 py-2 text-left">Status</th>
+                          <th className="px-3 py-2 text-left">Tool Calls</th>
+                          <th className="px-3 py-2 text-left">Latest Tool</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-slate-900/40 text-slate-300">
+                        {t.map((task, idx) => {
+                          const rid = lastResult?.results?.find(
+                            (r) => (r.task_id || "") === (task.task_id || task.id)
+                          );
+                          let diag = rid ? summarizeTaskDiagnostics(rid) : { totalToolCalls: 0, latestName: "" };
+                          const liveCalls = toolCountsByTask[task.task_id || task.id || ""] ?? 0;
+                          const liveLatest = latestToolByTask[task.task_id || task.id || ""];
+                          if (streaming && (liveCalls > 0 || liveLatest)) {
+                            diag = {
+                              totalToolCalls: Math.max(diag.totalToolCalls, liveCalls),
+                              latestName: liveLatest || diag.latestName,
+                            };
+                          }
+                          const isLive = streaming && (currentTaskId === (task.task_id || task.id));
+                          const status = isLive ? "Working…" : rid ? (rid.error ? "Error" : "OK") : "—";
 
-                    <div className="mt-2 overflow-x-auto rounded-lg border border-slate-800">
-                      <table className="min-w-full text-sm">
-                        <thead className="bg-slate-800/60 text-slate-200">
-                          <tr>
-                            <th className="px-3 py-2 text-left">#</th>
-                            <th className="px-3 py-2 text-left">Title</th>
-                            <th className="px-3 py-2 text-left">Status</th>
-                            <th className="px-3 py-2 text-left">Tool Calls</th>
-                            <th className="px-3 py-2 text-left">Latest Tool</th>
-                          </tr>
-                        </thead>
-                        <tbody className="bg-slate-900/40 text-slate-300">
-                          {t.map((task) => {
-                            const rid = lastResult?.results?.find(
-                              (r) => (r.task_id || "") === (task.task_id || task.id)
-                            );
-                            let diag = rid ? summarizeTaskDiagnostics(rid) : { totalToolCalls: 0, latestName: "" };
-                            // live overrides (while streaming)
-                            const liveCalls = toolCountsByTask[task.task_id || task.id || ""] ?? 0;
-                            const liveLatest = latestToolByTask[task.task_id || task.id || ""];
-                            if (streaming && (liveCalls > 0 || liveLatest)) {
-                              diag = {
-                                totalToolCalls: Math.max(diag.totalToolCalls, liveCalls),
-                                latestName: liveLatest || diag.latestName,
-                              };
-                            }
-                            const isLive = streaming && (currentTaskId === (task.task_id || task.id));
-                            const status = isLive ? "Working…" : rid ? (rid.error ? "Error" : "OK") : "—";
-
-                            return (
-                              <tr key={`${task.task_id || task.id || Math.random()}`} className="border-t border-slate-800">
-                                <td className="px-3 py-2">{task.order ?? "?"}</td>
-                                <td className="px-3 py-2">{task.title || task.description || "(task)"}</td>
-                                <td className="px-3 py-2">
-                                  {status === "OK" ? (
-                                    <span className="rounded-md bg-emerald-800/50 px-2 py-0.5 text-emerald-200">OK</span>
-                                  ) : status === "Error" ? (
-                                    <span className="rounded-md bg-rose-800/40 px-2 py-0.5 text-rose-200">Error</span>
-                                  ) : (
-                                    <span className="rounded-md bg-slate-800/50 px-2 py-0.5 text-slate-300">—</span>
-                                  )}
-                                </td>
-                                <td className="px-3 py-2">{diag.totalToolCalls}</td>
-                                <td className="px-3 py-2 font-mono">{diag.latestName || "—"}</td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  </details>
+                          return (
+                            <tr key={`${task.task_id || task.id || Math.random()}`} className="border-t border-slate-800">
+                              <td className="px-3 py-2">{task.order ?? idx + 1}</td>
+                              <td className="px-3 py-2">
+                                {coerceTextLike(task.title) || coerceTextLike(task.description) || "(task)"}
+                              </td>
+                              <td className="px-3 py-2">
+                                {status === "OK" ? (
+                                  <span className="rounded-md bg-emerald-800/50 px-2 py-0.5 text-emerald-200">OK</span>
+                                ) : status === "Error" ? (
+                                  <span className="rounded-md bg-rose-800/40 px-2 py-0.5 text-rose-200">Error</span>
+                                ) : (
+                                  <span className="rounded-md bg-slate-800/50 px-2 py-0.5 text-slate-300">—</span>
+                                )}
+                              </td>
+                              <td className="px-3 py-2">{diag.totalToolCalls}</td>
+                              <td className="px-3 py-2 font-mono">{diag.latestName || "—"}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
               </div>
             );
-          })}
-        </div>
-      </Section>
+          })()}
+        </Section>
 
       <Section title="Run Log / Result">
         {busy && <div className="mb-2 text-sm text-slate-300">Working… this can take a little while.</div>}
