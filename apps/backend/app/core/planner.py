@@ -52,6 +52,67 @@ def _columns(model) -> set[str]:
 
 from collections import defaultdict, deque
 
+def _validate_llm_order(bundle: PlanBundle) -> None:
+    """
+    Enforce that the LLM provides complete ordering + true prerequisites.
+    We do not sort or mutate anything here — we only validate and fail fast.
+    Rules:
+      • All epics/stories must have positive, unique priority_rank (per epic for stories).
+      • For any item with rank > 1, depends_on MUST be non-empty and reference earlier items only.
+      • Story dependencies must stay within the same epic.
+    """
+    # ---- Epics ----
+    epic_ids = [e.id for e in bundle.epics]
+    rank_by_epic = {e.id: int(getattr(e, "priority_rank", 0) or 0) for e in bundle.epics}
+    epic_ranks = list(rank_by_epic.values())
+
+    for e in bundle.epics:
+        r = rank_by_epic[e.id]
+        if r <= 0:
+            raise ValueError(f"LLM must set positive priority_rank for epic {e.id}")
+        deps = list(getattr(e, "depends_on", []) or [])
+        # If not first in order, must depend on at least one earlier epic
+        if r > 1 and not deps:
+            raise ValueError(f"Epic {e.id} (rank {r}) must declare depends_on one or more earlier epics")
+        for dep in deps:
+            if dep not in epic_ids:
+                raise ValueError(f"Epic {e.id} depends_on unknown epic id '{dep}'")
+            if dep == e.id:
+                raise ValueError(f"Epic {e.id} cannot depend on itself")
+            if rank_by_epic.get(dep, 0) >= r:
+                raise ValueError(f"Epic {e.id} (rank {r}) depends_on epic {dep} with equal/greater rank")
+    if len(set(epic_ranks)) != len(epic_ranks):
+        raise ValueError("Duplicate epic priority_rank values are not allowed")
+
+    # ---- Stories (validate per-epic) ----
+    stories_by_epic: dict[str, list[Story]] = {}
+    for s in bundle.stories:
+        stories_by_epic.setdefault(s.epic_id, []).append(s)
+
+    for epic_id, group in stories_by_epic.items():
+        rank_by_story = {s.id: int(getattr(s, "priority_rank", 0) or 0) for s in group}
+        sids = set(rank_by_story.keys())
+        sranks = list(rank_by_story.values())
+
+        for s in group:
+            r = rank_by_story[s.id]
+            if r <= 0:
+                raise ValueError(f"LLM must set positive priority_rank for story {s.id} (epic {epic_id})")
+            deps = list(getattr(s, "depends_on", []) or [])
+            if r > 1 and not deps:
+                raise ValueError(f"Story {s.id} (rank {r}, epic {epic_id}) must depend on an earlier story in the same epic")
+            for dep in deps:
+                if dep not in sids:
+                    raise ValueError(f"Story {s.id} depends_on '{dep}' outside its epic {epic_id}")
+                if dep == s.id:
+                    raise ValueError(f"Story {s.id} cannot depend on itself")
+                if rank_by_story.get(dep, 0) >= r:
+                    raise ValueError(f"Story {s.id} (rank {r}) depends_on '{dep}' with equal/greater rank in epic {epic_id}")
+
+        if len(set(sranks)) != len(sranks):
+            raise ValueError(f"Duplicate story priority_rank values in epic {epic_id} are not allowed")
+
+
 def _topo_order(nodes: list, get_id, get_deps) -> list[str]:
     """Return a stable topological order of node IDs; breaks ties by original order."""
     id_list = [get_id(n) for n in nodes]
@@ -89,43 +150,43 @@ def _topo_order(nodes: list, get_id, get_deps) -> list[str]:
     return ordered
 
 
-def _apply_dependency_ordering(bundle: PlanBundle) -> PlanBundle:
-    """
-    Use depends_on to compute stable priority_rank for Epics and Stories.
-    We only fill ranks when missing or zero; if LLM provided ranks, we keep them.
-    """
-    # ---- Epics: topo order by depends_on, then assign any missing ranks ----
-    epic_order = _topo_order(
-        bundle.epics,
-        get_id=lambda e: e.id,
-        get_deps=lambda e: (getattr(e, "depends_on", []) or []),
-    )
-    if epic_order:
-        idx_map = {eid: i for i, eid in enumerate(epic_order, start=1)}
-        for e in bundle.epics:
-            if not getattr(e, "priority_rank", None) or int(getattr(e, "priority_rank") or 0) == 0:
-                e.priority_rank = idx_map.get(e.id, e.priority_rank or 0) or 0
+# def _apply_dependency_ordering(bundle: PlanBundle) -> PlanBundle:
+#     """
+#     Use depends_on to compute stable priority_rank for Epics and Stories.
+#     We only fill ranks when missing or zero; if LLM provided ranks, we keep them.
+#     """
+#     # ---- Epics: topo order by depends_on, then assign any missing ranks ----
+#     epic_order = _topo_order(
+#         bundle.epics,
+#         get_id=lambda e: e.id,
+#         get_deps=lambda e: (getattr(e, "depends_on", []) or []),
+#     )
+#     if epic_order:
+#         idx_map = {eid: i for i, eid in enumerate(epic_order, start=1)}
+#         for e in bundle.epics:
+#             if not getattr(e, "priority_rank", None) or int(getattr(e, "priority_rank") or 0) == 0:
+#                 e.priority_rank = idx_map.get(e.id, e.priority_rank or 0) or 0
 
-    # ---- Stories: per-epic topo order, then assign any missing ranks ----
-    from collections import defaultdict
-    by_epic: dict[str, list[Story]] = defaultdict(list)
-    for s in bundle.stories:
-        by_epic[s.epic_id].append(s)
+#     # ---- Stories: per-epic topo order, then assign any missing ranks ----
+#     from collections import defaultdict
+#     by_epic: dict[str, list[Story]] = defaultdict(list)
+#     for s in bundle.stories:
+#         by_epic[s.epic_id].append(s)
 
-    for epic_id, group in by_epic.items():
-        story_order = _topo_order(
-            group,
-            get_id=lambda s: s.id,
-            get_deps=lambda s: (getattr(s, "depends_on", []) or []),
-        )
-        if story_order:
-            # assign only if missing
-            rank_by_id = {sid: i for i, sid in enumerate(story_order, start=1)}
-            for s in group:
-                if not getattr(s, "priority_rank", None) or int(getattr(s, "priority_rank") or 0) == 0:
-                    s.priority_rank = rank_by_id.get(s.id, s.priority_rank or 0) or 0
+#     for epic_id, group in by_epic.items():
+#         story_order = _topo_order(
+#             group,
+#             get_id=lambda s: s.id,
+#             get_deps=lambda s: (getattr(s, "depends_on", []) or []),
+#         )
+#         if story_order:
+#             # assign only if missing
+#             rank_by_id = {sid: i for i, sid in enumerate(story_order, start=1)}
+#             for s in group:
+#                 if not getattr(s, "priority_rank", None) or int(getattr(s, "priority_rank") or 0) == 0:
+#                     s.priority_rank = rank_by_id.get(s.id, s.priority_rank or 0) or 0
 
-    return bundle
+#     return bundle
 
 
 
@@ -231,14 +292,15 @@ def finalise_plan(db: Session, run_id: str,
 
     # Generate remaining artefacts and persist full bundle
     bundle = pm.plan_remaining(p_req.model_dump(), pv, ts, db=db, run_id=run_id)
-    bundle = _apply_dependency_ordering(bundle)
-    try:
-        if any(getattr(e, "priority_rank", None) in (None, 0) for e in bundle.epics):
-            logger.debug("plan_run: filled missing epic ranks after LLM output")
-        if any(getattr(s, "priority_rank", None) in (None, 0) for s in bundle.stories):
-            logger.debug("plan_run: filled missing story ranks after LLM output")
-    except Exception:
-        pass
+    # bundle = _apply_dependency_ordering(bundle)
+    # try:
+    #     if any(getattr(e, "priority_rank", None) in (None, 0) for e in bundle.epics):
+    #         logger.debug("plan_run: filled missing epic ranks after LLM output")
+    #     if any(getattr(s, "priority_rank", None) in (None, 0) for s in bundle.stories):
+    #         logger.debug("plan_run: filled missing story ranks after LLM output")
+    # except Exception:
+    #     pass
+    #_validate_llm_order(bundle)
     _persist_plan(db, run_id, req, bundle)
     return bundle
 
@@ -247,22 +309,22 @@ def _persist_plan(db: Session, run_id: str, requirement: RequirementORM, bundle:
     db.merge(ProductVisionORM(run_id=run_id, data=bundle.product_vision.model_dump()))
     db.merge(TechnicalSolutionORM(run_id=run_id, data=bundle.technical_solution.model_dump()))
 
-    # epics
-    if bundle.epics:
-        # safety: only fill ranks that are still missing after dependency ordering
-        if any(getattr(e, "priority_rank", None) in (None, 0) for e in bundle.epics):
-            used = {
-                int(getattr(e, "priority_rank", 0) or 0)
-                for e in bundle.epics
-                if getattr(e, "priority_rank", None) not in (None, 0)
-            }
-            next_rank = 1
-            for e in bundle.epics:
-                if not getattr(e, "priority_rank", None) or int(getattr(e, "priority_rank") or 0) == 0:
-                    while next_rank in used:
-                        next_rank += 1
-                    e.priority_rank = next_rank
-                    used.add(next_rank)
+    # # epics
+    # if bundle.epics:
+    #     # safety: only fill ranks that are still missing after dependency ordering
+    #     if any(getattr(e, "priority_rank", None) in (None, 0) for e in bundle.epics):
+    #         used = {
+    #             int(getattr(e, "priority_rank", 0) or 0)
+    #             for e in bundle.epics
+    #             if getattr(e, "priority_rank", None) not in (None, 0)
+    #         }
+    #         next_rank = 1
+    #         for e in bundle.epics:
+    #             if not getattr(e, "priority_rank", None) or int(getattr(e, "priority_rank") or 0) == 0:
+    #                 while next_rank in used:
+    #                     next_rank += 1
+    #                 e.priority_rank = next_rank
+    #                 used.add(next_rank)
     epic_cols = _columns(EpicORM)
     for e in bundle.epics:
         _epic_kwargs: Dict[str, Any] = {
@@ -276,7 +338,7 @@ def _persist_plan(db: Session, run_id: str, requirement: RequirementORM, bundle:
             _epic_kwargs["depends_on"] = [str(d) for d in (getattr(e, "depends_on", []) or [])]
         db.merge(EpicORM(**_epic_kwargs))
 
-    # ---- Stories: ensure per-epic ranks exist, then persist once ----
+    # ---- Stories: group by epic, validate, and persist exactly as provided ----
     by_epic_for_rank: dict[str, list[Story]] = {}
     for s in bundle.stories:
         by_epic_for_rank.setdefault(s.epic_id, []).append(s)
@@ -284,23 +346,12 @@ def _persist_plan(db: Session, run_id: str, requirement: RequirementORM, bundle:
     story_cols = _columns(StoryORM)
 
     for epic_id, group in by_epic_for_rank.items():
-        # If any rank is missing, fill only the missing ones, preserving LLM/topo ranks
+        # ensure every story has a positive, explicit priority_rank
         if any(getattr(s, "priority_rank", None) in (None, 0) for s in group):
-            used = {
-                int(getattr(s, "priority_rank", 0) or 0)
-                for s in group
-                if getattr(s, "priority_rank", None) not in (None, 0)
-            }
-            next_rank = 1
-            missing = [s for s in group if getattr(s, "priority_rank", None) in (None, 0)]
-            for s in sorted(missing, key=lambda x: x.title.lower()):
-                while next_rank in used:
-                    next_rank += 1
-                s.priority_rank = next_rank
-                used.add(next_rank)
+            raise ValueError(f"LLM must provide priority_rank for all stories in epic {epic_id}")
 
-        # Persist each story (sorted by rank then title for determinism)
-        for s in sorted(group, key=lambda x: (int(getattr(x, "priority_rank", 0) or 0), x.title.lower())):
+        # persist in LLM-declared order; tie-break by title only for deterministic DB writes
+        for s in sorted(group, key=lambda x: (int(getattr(x, "priority_rank")), x.title.lower())):
             _story_kwargs: Dict[str, Any] = {
                 "id": s.id,
                 "run_id": run_id,
@@ -310,13 +361,13 @@ def _persist_plan(db: Session, run_id: str, requirement: RequirementORM, bundle:
                 "description": s.description,
             }
             if "priority_rank" in story_cols:
-                _story_kwargs["priority_rank"] = int(getattr(s, "priority_rank", 1) or 1)
+                _story_kwargs["priority_rank"] = int(s.priority_rank)
             if "depends_on" in story_cols:
                 _story_kwargs["depends_on"] = [str(d) for d in (getattr(s, "depends_on", []) or [])]
 
             db.merge(StoryORM(**_story_kwargs))
 
-            # clear then re-write acceptance entries for this story (always)
+            # clear then re-write acceptance entries for this story
             db.query(AcceptanceORM).filter_by(
                 run_id=run_id, story_id=s.id
             ).delete(synchronize_session=False)
@@ -342,7 +393,9 @@ def _persist_plan(db: Session, run_id: str, requirement: RequirementORM, bundle:
             "title": t.title or "",
         }
             if "order" in task_cols:
-                kwargs["order"] = int(getattr(t, "order", 1) or 1)
+                if getattr(t, "order", None) in (None, 0):
+                    raise ValueError(f"LLM did not supply a valid 'order' for task '{t.title}' (story {s.id}).")
+                kwargs["order"] = int(t.order)
             if "status" in task_cols:
                 kwargs["status"] = t.status
             db.merge(TaskORM(**kwargs))
@@ -418,14 +471,15 @@ def plan_run(db: Session, run_id: str) -> PlanBundle:
     )
 
     bundle = pm.plan(p_req.model_dump(), db=db, run_id=run_id)
-    bundle = _apply_dependency_ordering(bundle)
-    try:
-        if any(getattr(e, "priority_rank", None) in (None, 0) for e in bundle.epics):
-            logger.debug("plan_run: filled missing epic ranks after LLM output")
-        if any(getattr(s, "priority_rank", None) in (None, 0) for s in bundle.stories):
-            logger.debug("plan_run: filled missing story ranks after LLM output")
-    except Exception:
-        pass
+    # bundle = _apply_dependency_ordering(bundle)
+    # try:
+    #     if any(getattr(e, "priority_rank", None) in (None, 0) for e in bundle.epics):
+    #         logger.debug("plan_run: filled missing epic ranks after LLM output")
+    #     if any(getattr(s, "priority_rank", None) in (None, 0) for s in bundle.stories):
+    #         logger.debug("plan_run: filled missing story ranks after LLM output")
+    # except Exception:
+    #     pass
+    #_validate_llm_order(bundle)
     _persist_plan(db, run_id, req, bundle)
     return bundle
 

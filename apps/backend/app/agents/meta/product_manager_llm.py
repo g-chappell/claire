@@ -352,56 +352,137 @@ class ProductManagerLLM:
             config=config,
         )
 
-        # Map epics
-        epic_map: Dict[str, str] = {}  # epic_title -> epic_id
+        # Map epics from RA plan — preserve LLM priority_ranks and dependencies
         epics: List[Epic] = []
-        for ed in ra_draft.epics or []:
-            eid = _gen_id("E", requirement.get("id", "") + ":" + ed.title)
-            epic_map[ed.title.strip().lower()] = eid
-            epics.append(Epic(id=eid, title=ed.title, description=ed.description or "", priority_rank=1))
+        epic_id_by_title: Dict[str, str] = {}
 
-        # Map stories to epic_ids (by epic_title)
-        stories: List[Story] = []
-        for sd in ra_draft.stories or []:
-            epic_id = epic_map.get((sd.epic_title or "").strip().lower())
-            if not epic_id:
-                epic_id = epics[0].id if epics else _gen_id("E", requirement.get("id", "") + ":default")
-                if not epics:
-                    epics.append(Epic(id=epic_id, title="Default Epic", description="", priority_rank=1))
-            sid = _gen_id("S", requirement.get("id", "") + ":" + sd.title)
-            stories.append(
-                Story(
-                    id=sid,
-                    epic_id=epic_id,
-                    title=sd.title,
-                    description=sd.description or "",
-                    priority_rank=1,
-                    acceptance=[],
-                    tests=[],
+        for ed in ra_draft.epics or []:
+            title = (ed.title or "").strip()
+            if not title:
+                continue
+            eid = _gen_id("E", requirement.get("id", "") + ":" + title)
+            epic_id_by_title[title.lower()] = eid
+            epics.append(
+                Epic(
+                    id=eid,
+                    title=ed.title,
+                    description=ed.description or "",
+                    priority_rank=ed.priority_rank or 1,
+                    depends_on=[],  # filled after all epics are known
                 )
             )
 
-        # If the model somehow emitted nothing, keep the plan usable
-        if not stories:
-            if not epics:
-                epic_id = _gen_id("E", requirement.get("id", "") + ":default")
-                epics.append(Epic(id=epic_id, title="Default Epic", description="", priority_rank=1))
-            for e in epics:
-                sid = _gen_id("S", requirement.get("id", "") + ":" + e.title)
-                stories.append(
-                    Story(
-                        id=sid,
-                        epic_id=e.id,
-                        title=f"Deliver {e.title}",
-                        description=e.description or "",
-                        priority_rank=1,
-                        acceptance=[],
-                        tests=[],
-                    )
+        # Fallback: ensure at least one epic exists
+        if not epics:
+            default_title = "Default Epic"
+            eid = _gen_id("E", requirement.get("id", "") + ":" + default_title)
+            epic_id_by_title[default_title.lower()] = eid
+            epics.append(
+                Epic(
+                    id=eid,
+                    title=default_title,
+                    description="",
+                    priority_rank=1,
+                    depends_on=[],
                 )
+            )
 
-        # PM ordering
-        epics, stories = _order_epics_and_stories(epics, stories)
+        # Wire epic-level dependencies using epic titles from the RA plan
+        for ed in ra_draft.epics or []:
+            src_title = (ed.title or "").strip()
+            if not src_title:
+                continue
+            src_id = epic_id_by_title.get(src_title.lower())
+            if not src_id:
+                continue
+            epic = next((e for e in epics if e.id == src_id), None)
+            if not epic:
+                continue
+            dep_ids: List[str] = []
+            for dep_name in ed.depends_on or []:
+                key = (dep_name or "").strip().lower()
+                if not key:
+                    continue
+                dep_id = epic_id_by_title.get(key)
+                if dep_id and dep_id != epic.id and dep_id not in dep_ids:
+                    dep_ids.append(dep_id)
+            epic.depends_on = dep_ids
+
+        # Map stories from RA plan — preserve LLM priority_ranks and dependencies
+        stories: List[Story] = []
+        story_id_by_title_and_epic: Dict[tuple[str, str], str] = {}
+
+        for sd in ra_draft.stories or []:
+            story_title = (sd.title or "").strip()
+            epic_title = (sd.epic_title or "").strip()
+            if not story_title:
+                continue
+
+            epic_id = epic_id_by_title.get(epic_title.lower()) if epic_title else None
+            if not epic_id:
+                # fall back to the first epic if mapping fails
+                epic_id = epics[0].id
+
+            sid = _gen_id("S", requirement.get("id", "") + ":" + story_title)
+            story = Story(
+                id=sid,
+                epic_id=epic_id,
+                title=sd.title,
+                description=sd.description or "",
+                priority_rank=sd.priority_rank or 1,
+                acceptance=[],
+                tests=[],
+                depends_on=[],  # filled after all stories are known
+            )
+            stories.append(story)
+            story_id_by_title_and_epic[(story_title.lower(), epic_id)] = sid
+
+        # If the model somehow emitted no stories, keep the plan usable
+        if not stories:
+            for e in epics:
+                story_title = f"Deliver {e.title}"
+                sid = _gen_id("S", requirement.get("id", "") + ":" + story_title)
+                story = Story(
+                    id=sid,
+                    epic_id=e.id,
+                    title=story_title,
+                    description=e.description or "",
+                    priority_rank=1,
+                    acceptance=[],
+                    tests=[],
+                    depends_on=[],
+                )
+                stories.append(story)
+                story_id_by_title_and_epic[(story_title.lower(), e.id)] = sid
+
+        # Wire story-level dependencies using story titles within the same epic
+        for sd in ra_draft.stories or []:
+            story_title = (sd.title or "").strip()
+            epic_title = (sd.epic_title or "").strip()
+            if not story_title or not epic_title:
+                continue
+            epic_id = epic_id_by_title.get(epic_title.lower())
+            if not epic_id:
+                continue
+            sid = story_id_by_title_and_epic.get((story_title.lower(), epic_id))
+            if not sid:
+                continue
+            story = next((s for s in stories if s.id == sid), None)
+            if not story:
+                continue
+            dep_ids: List[str] = []
+            for dep_name in sd.depends_on or []:
+                key = (dep_name or "").strip().lower()
+                if not key:
+                    continue
+                dep_sid = story_id_by_title_and_epic.get((key, epic_id))
+                if dep_sid and dep_sid != story.id and dep_sid not in dep_ids:
+                    dep_ids.append(dep_sid)
+            story.depends_on = dep_ids
+
+        # Finally, sort epics and stories using the LLM-provided priority ranks
+        epics.sort(key=lambda e: e.priority_rank)
+        stories.sort(key=lambda s: s.priority_rank)
 
         # Title->ID maps used by downstream steps (tasks, notes)
         epic_id_by_title: Dict[str, str] = {e.title.strip().lower(): e.id for e in epics}

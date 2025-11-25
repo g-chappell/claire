@@ -67,6 +67,29 @@ function Badge({ children }: { children: React.ReactNode }) {
   );
 }
 
+// Small clickable chip for dependencies
+function DepChip({
+  label,
+  onClick,
+  title,
+}: {
+  label: string;
+  onClick?: () => void;
+  title?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      className="inline-flex items-center gap-1 rounded-md border border-amber-600/60 bg-amber-900/20 px-2 py-0.5 text-xs text-amber-200 hover:bg-amber-900/30"
+    >
+      <span aria-hidden>🔗</span>
+      {label}
+    </button>
+  );
+}
+
 function Section({
   title,
   right,
@@ -191,6 +214,16 @@ export default function ImplementCodePage() {
     return map;
   }, [epics]);
 
+  const depStats = useMemo(() => {
+  const epicDeps = (epics ?? []).filter(
+      e => Array.isArray((e as any).depends_on) && (e as any).depends_on.length > 0
+    ).length;
+    const storyDeps = (stories ?? []).filter(
+      s => Array.isArray((s as any).depends_on) && (s as any).depends_on.length > 0
+    ).length;
+    return { epicDeps, storyDeps };
+  }, [epics, stories]);
+
   // Rank lookup for epics
   const epicRankById = useMemo(() => {
     const map: Record<string, number> = {};
@@ -201,7 +234,6 @@ export default function ImplementCodePage() {
     return map;
   }, [epics]);
 
-  // Title lookup for stories (for pretty depends_on rendering)
   const storyTitleById = useMemo(() => {
     const map: Record<string, string> = {};
     for (const s of stories) {
@@ -210,6 +242,14 @@ export default function ImplementCodePage() {
     }
     return map;
   }, [stories]);
+
+  // NEW: dependencies of the currently-selected story, coerced to string IDs
+  const depsOfSelected = useMemo(() => {
+    if (!selectedStoryId) return new Set<string>();
+    const s = stories.find(st => String(st.id ?? st.story_id ?? "") === selectedStoryId);
+    const raw = Array.isArray((s as any)?.depends_on) ? (s as any).depends_on : [];
+    return new Set<string>(raw.map((d: any) => String(d)));
+  }, [selectedStoryId, stories]);
 
   // Map of tasks per story id
   const tasksByStory = useMemo(() => {
@@ -554,6 +594,8 @@ await doPostFallback();
           <Badge>Epics: {counts.epics}</Badge>
           <Badge>Stories: {counts.stories}</Badge>
           <Badge>Tasks: {counts.tasks}</Badge>
+          <Badge>Epics w/ deps: {depStats.epicDeps}</Badge>
+          <Badge>Stories w/ deps: {depStats.storyDeps}</Badge>
         </div>
 
         {!!tools.length && (
@@ -664,16 +706,31 @@ await doPostFallback();
                 {epicsOrdered.map((e, i) => {
                   const eid = ((e as any).id ?? "").toString();
                   const erank = (e as any).priority_rank ?? i + 1;
-                  const eDeps = Array.isArray((e as any).depends_on) ? (e as any).depends_on : [];
+                  const eDeps = Array.isArray((e as any).depends_on) ? (e as any).depends_on.map((d:any) => String(d)) : [];
                   const storiesForEpic = storiesByEpicOrdered.get(eid) || [];
                   return (
                     <tr key={eid || e.title} className="border-t border-slate-800 align-top">
                       <td className="px-3 py-2">#{erank}</td>
                       <td className="px-3 py-2">
-                        <div className="font-medium">{e.title}</div>
+                        <div className="font-medium flex items-center gap-2">
+                          <span>{e.title}</span>
+                          {eDeps.length ? (
+                            <span className="rounded bg-amber-800/60 px-1.5 py-0.5 text-[10px]">deps:{eDeps.length}</span>
+                          ) : null}
+                        </div>
                         {eDeps.length ? (
-                          <div className="mt-1 text-xs text-slate-400">
-                            Depends on: {eDeps.map((id: string) => epicTitleById[id] || id).join(", ")}
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {eDeps.map((id: string) => {
+                              const label = epicTitleById[id] || id;
+                              return (
+                                <DepChip
+                                  key={id}
+                                  label={label}
+                                  title={`Depends on epic: ${label}`}
+                                  onClick={() => setSelectedEpic(id)}
+                                />
+                              );
+                            })}
                           </div>
                         ) : null}
                       </td>
@@ -682,21 +739,28 @@ await doPostFallback();
                           {storiesForEpic.map((s) => {
                             const sid = (s.id || s.story_id || "").toString();
                             const sRank = (s.priority_rank ?? 0) || 0;
-                            const sDeps = Array.isArray((s as any).depends_on) ? (s as any).depends_on : [];
+                            const sDeps = Array.isArray((s as any).depends_on) ? (s as any).depends_on.map((d:any) => String(d)) : [];
                             const depsTitle = sDeps.map((id: string) => storyTitleById[id] || id).join(", ");
                             return (
                               <button
                                 key={`${eid}-${sid}`}
-                                className={`rounded-md border border-slate-700 px-2 py-0.5 text-xs ${
-                                  selectedStoryId === sid ? "bg-slate-700 text-slate-100" : "bg-slate-800/60 text-slate-200"
-                                }`}
-                                title={sDeps.length ? `Depends on: ${depsTitle}` : ""}
+                                className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs ${
+                                  sDeps.length
+                                    ? "border-amber-600/70 bg-amber-900/20 text-amber-200 hover:bg-amber-900/30"
+                                    : "border-slate-700 bg-slate-800/60 text-slate-200 hover:bg-slate-800"
+                                } ${selectedStoryId === sid ? "ring-1 ring-slate-400/50" : ""} ${depsOfSelected.has(sid) ? "ring-1 ring-amber-400/60" : ""}`}
+                                title={sDeps.length ? `Depends on: ${depsTitle}` : "No declared dependencies"}
                                 onClick={() => {
                                   setSelectedEpic(eid);
                                   setSelectedStoryId(sid);
                                 }}
                               >
                                 #{sRank || "?"} — {s.title}
+                                {sDeps.length ? (
+                                  <span className="ml-1 rounded bg-amber-800/60 px-1.5 py-0.5 text-[10px]">
+                                    deps:{sDeps.length}
+                                  </span>
+                                ) : null}
                               </button>
                             );
                           })}
@@ -719,7 +783,7 @@ await doPostFallback();
             const t = selectedTasks;
             const pr = selectedProgress;
             const epicName = s?.epic_title || (s?.epic_id ? epicTitleById[s.epic_id] : "");
-            const sDeps = Array.isArray((s as any)?.depends_on) ? (s as any)?.depends_on as string[] : [];
+            const sDeps = Array.isArray((s as any)?.depends_on) ? (s as any).depends_on.map((d:any) => String(d)) : [];
             const p = pr.total > 0 ? Math.round((pr.ok / pr.total) * 100) : 0;
 
             return (
@@ -730,11 +794,25 @@ await doPostFallback();
                 <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-400">
                   {s?.epic_id && epicRankById[s.epic_id] ? <Badge>Epic #{epicRankById[s.epic_id]}</Badge> : null}
                   {typeof s?.priority_rank === "number" ? <Badge>Story #{s?.priority_rank}</Badge> : null}
-                  {sDeps.length ? (
-                    <span>
-                      Depends on: {sDeps.map((id: string) => storyTitleById[id] || id).join(", ")}
-                    </span>
-                  ) : null}
+                    {sDeps.length ? (
+                      <div className="flex flex-wrap items-center gap-1">
+                        <span className="text-slate-400">Depends on:</span>
+                        {sDeps.map((id: string) => {
+                          const label = storyTitleById[id] || id;
+                          return (
+                            <DepChip
+                              key={id}
+                              label={label}
+                              title={`Open story: ${label}`}
+                              onClick={() => {
+                                setSelectedEpic(String(s?.epic_id ?? ""));
+                                setSelectedStoryId(id);
+                              }}
+                            />
+                          );
+                        })}
+                      </div>
+                    ) : null}
                 </div>
 
                 {s?.description && <div className="text-sm text-slate-300">{s.description}</div>}
