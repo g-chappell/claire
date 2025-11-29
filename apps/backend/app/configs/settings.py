@@ -20,7 +20,7 @@ class _Common:
 
     # LLM (informational)
     LLM_PROVIDER: Optional[str] = None
-    LLM_MODEL: str = "claude-3-7-sonnet-20250219"
+    LLM_MODEL: str = "claude-sonnet-4-5-20250929"
     TEMPERATURE: float = 0.2
     LLM_CALL_DELAY_SECONDS: float = 5.0  # default spacing; set to 0 to disable
 
@@ -84,7 +84,7 @@ class _Common:
         "replace_symbol_body",
         "insert_after_symbol",
         "insert_before_symbol",
-        "replace_regex",
+        "replace_content",
         "rename_symbol",
         "activate_project",
         "get_current_config",

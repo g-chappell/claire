@@ -15,6 +15,7 @@ from app.storage.models import (
 from app.configs.settings import get_settings
 from app.agents.coding.coding_agent import CodingAgent
 from app.agents.coding.serena_tools import get_serena_tools, close_serena
+from app.core.planner import _topo_order
 
 router = APIRouter(prefix="/code", tags=["coding"])
 
@@ -210,36 +211,52 @@ async def implement_story(run_id: str, story_id: str, request: Request, db: Sess
     acc = _acceptance_text(db, run_id, story_id)
     desc = acc or _as_text(story.description)
 
-    # Strict 1-by-1: tasks ordered via helper (uses .order if present, else .id)
-    tasks = _tasks_for_story(db, run_id, story_id)
+    # Tasks are now just story-level guidance, not separate agent calls
+    tasks_orm = _tasks_for_story(db, run_id, story_id)
+    task_titles: List[str] = []
+    for t in tasks_orm:
+        title = getattr(t, "title", None) or f"Task {getattr(t, 'id', '')}"
+        task_titles.append(title)
 
-    results: List[Dict[str, Any]] = []
-    for t in tasks:
-        try:
-            out = await agent.implement_task(
-                request=request,
-                project_dir=project_dir,
-                product_vision=pvs,
-                technical_solution=tss,
-                epic_title=_epic_title(db, story.epic_id),
-                story_title=story.title or "",
-                story_desc=desc,
-                task_title=t.title or "",
-            )
-            from collections.abc import Mapping as _Mapping
+    try:
+        out = await agent.implement_story(
+            request=request,
+            project_dir=project_dir,
+            product_vision=pvs,
+            technical_solution=tss,
+            epic_title=_epic_title(db, story.epic_id),
+            story_title=story.title or "",
+            story_desc=desc,
+            story_tasks=task_titles,
+        )
+        from collections.abc import Mapping as _Mapping
 
-            task_id = getattr(t, "id", None) or getattr(t, "task_id", None)
+        if isinstance(out, _Mapping):
+            cleaned = _only_known_keys(out)  # keep useful fields; stringify the rest
+        else:
+            cleaned = {"result": _safe_json(out)}
 
-            if isinstance(out, _Mapping):
-                cleaned = _only_known_keys(out)  # keep useful fields; stringify the rest
-            else:
-                cleaned = {"result": _safe_json(out)}
+        return jsonable_encoder({
+            "run_id": run_id,
+            "story_id": story_id,
+            "tasks": [
+                {
+                    "id": getattr(t, "id", None),
+                    "title": getattr(t, "title", ""),
+                    "order": getattr(t, "order", None),
+                }
+                for t in tasks_orm
+            ],
+            "result": cleaned,
+        })
+    except Exception as e:
+        return jsonable_encoder({
+            "run_id": run_id,
+            "story_id": story_id,
+            "error": str(e),
+            "trace": traceback.format_exc(),
+        })
 
-            results.append({"task_id": task_id, **cleaned})
-        except Exception as e:
-            results.append({"task_id": t.id, "error": str(e), "trace": traceback.format_exc()})
-
-    return jsonable_encoder({"run_id": run_id, "story_id": story_id, "results": results})
 
 @router.get("/runs/{run_id}/story/{story_id}/implement/stream")
 async def implement_story_stream(
@@ -250,80 +267,123 @@ async def implement_story_stream(
 ):
     """
     SSE stream of implement progress for a single story.
-    Mirrors the POST implement behavior but yields progress events.
+
+    IMPORTANT: this is now STORY-LEVEL, not task-by-task.
+    We send one Serena agent the full story + task list and stream its events.
     """
-    # Validate story from the DB, same as POST /implement
+    # Validate story from the DB (same as POST /implement)
     story = db.query(StoryORM).filter_by(run_id=run_id, id=story_id).first()
     if not story:
         raise HTTPException(status_code=404, detail="story not found")
 
-    # Reuse existing helpers from this module
     project_dir = _ensure_workspace(run_id)
     agent = CodingAgent()
 
+    # Shared context (PV/TS/epic/acceptance)
     pvs, tss = _pv_ts_strings(db, run_id)
     epic_title = _epic_title(db, story.epic_id)
     acc = _acceptance_text(db, run_id, story_id)
     story_desc = acc or _as_text(story.description)
-    tasks = _tasks_for_story(db, run_id, story_id)
 
-    # You can keep agent config simple; LangGraph will use defaults you’ve set elsewhere
-    cfg = {"recursion_limit": 100}  # or read from settings if you prefer
+    # Still load tasks from DB, but only to build the story_tasks list
+    tasks = _tasks_for_story(db, run_id, story_id)
+    story_tasks: List[str] = [
+        getattr(t, "title", None) or f"Task {getattr(t, 'id', '')}"
+        for t in tasks
+    ]
+
+    # Same recursion limit we use elsewhere
+    settings = get_settings()
+    cfg = {"recursion_limit": int(getattr(settings, "CODING_RECURSION_LIMIT", 30))}
 
     async def gen():
         # Prologue
-        yield _sse({"type": "stream:start", "run_id": str(run_id), "story_id": story_id})
+        yield _sse({
+            "type": "stream:start",
+            "event": "stream_start",
+            "run_id": str(run_id),
+            "story_id": story_id,
+        })
+        yield _sse({
+            "type": "story:start",
+            "event": "story_begin",
+            "run_id": str(run_id),
+            "story_id": story_id,
+        })
 
-        for t in tasks:
-            if await _client_disconnected(request):
-                break
+        # Build the exact prompt shape that CodingAgent.implement_story uses
+        try:
+            runnable = await agent._agent_for(request, project_dir=project_dir)
 
-            yield _sse({"type": "task:start", "task_id": getattr(t, "id", None), "title": getattr(t, "title", "")})
-
-            # Build the same prompt shape we use in implement_task
+            tasks_json = json.dumps(story_tasks, indent=2, ensure_ascii=False)
             prompt = (
                 f"Product Vision (summary): {pvs}\n"
                 f"Technical Solution (stack/modules): {tss}\n"
-                f"Epic: {epic_title or ''}\n"
-                f"Story: {story.title or ''} — {story_desc or ''}\n"
-                f"Task: {getattr(t, 'title', '') or ''}\n\n"
-                "Implement ONLY this task in the fewest possible steps using Serena tools."
+                f"Epic: {epic_title}\n"
+                f"Story: {story.title or ''} — {story_desc}\n"
+                f"Story Tasks (with dependencies and priority):\n{tasks_json}\n\n"
+                "Implement ALL of these tasks for this story in the fewest possible steps using Serena tools.\n"
+                "Respect depends_on and priority_rank when choosing the order of implementation.\n"
+                "Do NOT implement tasks from other stories or epics."
             )
 
-            try:
-                # Create a runnable agent for this task and stream its events
-                runnable = await agent._agent_for(request, project_dir=project_dir)
-                state = {"messages": [HumanMessage(content=prompt)]}
+            state = {"messages": [HumanMessage(content=prompt)]}
 
-                async for ev in runnable.astream_events(cast(Any, state), config=cfg):
+            # Stream raw Serena events, tagged with story_id
+            async for ev in runnable.astream_events(cast(Any, state), config=cfg):
+                if isinstance(ev, dict):
                     payload = {
                         "type": "event",
-                        "task_id": getattr(t, "id", None),
-                        "name": getattr(ev, "get", lambda *_: None)("name"),
-                        "event": getattr(ev, "get", lambda *_: None)("event"),
-                        "data": _safe_event(getattr(ev, "get", lambda *_: None)("data")),
+                        "story_id": story_id,
+                        "name": ev.get("name"),
+                        "event": ev.get("event"),
+                        "data": _safe_event(ev.get("data")),
                     }
-                    yield _sse(payload)
+                else:
+                    # Fallback for non-dict events
+                    payload = {
+                        "type": "event",
+                        "story_id": story_id,
+                        "event": getattr(ev, "event", None),
+                        "data": _safe_event(getattr(ev, "data", None)),
+                    }
 
-                yield _sse({"type": "task:done", "task_id": getattr(t, "id", None)})
+                yield _sse(payload)
 
-            except Exception as e:
-                yield _sse({
-                    "type": "task:error",
-                    "task_id": getattr(t, "id", None),
-                    "error": str(e),
-                })
+            # Normal completion
+            yield _sse({
+                "type": "story:done",
+                "event": "story_end",
+                "run_id": str(run_id),
+                "story_id": story_id,
+                "status": "ok",
+            })
 
-        yield _sse({"type": "stream:done", "run_id": str(run_id), "story_id": story_id})
+        except Exception as e:
+            # Error during story execution
+            yield _sse({
+                "type": "story:error",
+                "run_id": str(run_id),
+                "story_id": story_id,
+                "error": str(e),
+            })
+        finally:
+            # Always try to close Serena for this request
+            try:
+                await close_serena(request)
+            except Exception:
+                pass
 
+            # Epilogue
+            yield _sse({"type": "stream:done", "run_id": str(run_id), "story_id": story_id})
 
-    # Important: disable buffering & advertise SSE
     headers = {
         "Cache-Control": "no-cache",
         "Connection": "keep-alive",
         "X-Accel-Buffering": "no",
     }
     return StreamingResponse(gen(), media_type="text/event-stream", headers=headers)
+
 
 
 async def _client_disconnected(request: Request | None) -> bool:
@@ -366,58 +426,102 @@ async def execute_plan(
     agent = CodingAgent()
     pvs, tss = _pv_ts_strings(db, run_id)
 
-    def ekey(e: EpicORM) -> tuple[int, str]:
-        name = (e.title or "").lower()
-        if any(k in name for k in ["scaffold", "bootstrap", "baseline", "foundation"]): return (0, name)
-        if any(k in name for k in ["core", "auth", "routing", "persistence"]): return (1, name)
-        return (2, name)
-
+    # Load all epics/stories for the run
     epics = db.query(EpicORM).filter_by(run_id=run_id).all()
     stories = db.query(StoryORM).filter_by(run_id=run_id).all()
-    if epic_id:
-        epics = [e for e in epics if e.id == epic_id]
-    epics = sorted(epics, key=ekey)
-    if story_id:
-        stories = [s for s in stories if s.id == story_id]
+
+    # Apply filters up-front
+    if epic_id is not None:
+        epics = [e for e in epics if str(getattr(e, "id")) == str(epic_id)]
+        stories = [s for s in stories if str(getattr(s, "epic_id")) == str(epic_id)]
+    if story_id is not None:
+        stories = [s for s in stories if str(getattr(s, "id")) == str(story_id)]
+
+    # If nothing to do, short-circuit
+    if not epics or not stories:
+        return jsonable_encoder({"run_id": run_id, "logs": {}})
+
+    # --- Topological order for epics (by depends_on) ---
+    epic_order_ids = _topo_order(
+        epics,
+        get_id=lambda e: str(getattr(e, "id")),
+        get_deps=lambda e: [str(d) for d in (getattr(e, "depends_on", []) or [])],
+    )
+    epic_by_id = {str(getattr(e, "id")): e for e in epics}
+
+    # Group stories by epic
+    stories_by_epic: Dict[str, List[StoryORM]] = {}
+    for s in stories:
+        eid = str(getattr(s, "epic_id"))
+        stories_by_epic.setdefault(eid, []).append(s)
 
     logs: Dict[str, List[Dict[str, Any]]] = {}
 
-    for e in epics:
-        s_list = sorted(
-            [s for s in stories if s.epic_id == e.id],
-            key=lambda s: (s.priority_rank or 9999, s.id),
+    for eid in epic_order_ids:
+        e = epic_by_id.get(eid)
+        if not e:
+            continue
+
+        epic_stories = stories_by_epic.get(eid, [])
+        if not epic_stories:
+            # no stories for this epic in the filtered set
+            continue
+
+        # --- Topological order for stories within this epic ---
+        story_order_ids = _topo_order(
+            epic_stories,
+            get_id=lambda s: str(getattr(s, "id")),
+            get_deps=lambda s: [str(d) for d in (getattr(s, "depends_on", []) or [])],
         )
-        for s in s_list:
-            # Use the helper instead of TaskORM.order directly
+        story_by_id = {str(getattr(s, "id")): s for s in epic_stories}
+
+        for sid in story_order_ids:
+            s = story_by_id.get(sid)
+            if not s:
+                continue
+
             tasks = _tasks_for_story(db, run_id, s.id)
-            story_logs: List[Dict[str, Any]] = []
             acc = _acceptance_text(db, run_id, s.id)
             desc = acc or _as_text(s.description)
-            for t in tasks:
-                try:
-                    out = await agent.implement_task(
-                        request=request,
-                        project_dir=project_dir,
-                        product_vision=pvs,
-                        technical_solution=tss,
-                        epic_title=e.title or "",
-                        story_title=s.title or "",
-                        story_desc=desc,
-                        task_title=t.title or "",
-                    )
 
-                    from collections.abc import Mapping as _Mapping
-                    task_id = getattr(t, "id", None) or getattr(t, "task_id", None)
+            task_titles = [
+                getattr(t, "title", None) or f"Task {getattr(t, 'id', '')}"
+                for t in tasks
+            ]
 
-                    if isinstance(out, _Mapping):
-                        cleaned = _only_known_keys(out)
-                    else:
-                        cleaned = {"result": _safe_json(out)}
+            try:
+                out = await agent.implement_story(
+                    request=request,
+                    project_dir=project_dir,
+                    product_vision=pvs,
+                    technical_solution=tss,
+                    epic_title=e.title or "",
+                    story_title=s.title or "",
+                    story_desc=desc,
+                    story_tasks=task_titles,
+                )
 
-                    story_logs.append({"task_id": task_id, **cleaned})
-                except Exception as e2:
-                    story_logs.append({"task_id": getattr(t, "id", None), "error": str(e2), "trace": traceback.format_exc()})
-                logs[s.id] = story_logs
+                from collections.abc import Mapping as _Mapping
+
+                if isinstance(out, _Mapping):
+                    cleaned = _only_known_keys(out)
+                else:
+                    cleaned = {"result": _safe_json(out)}
+
+                logs[str(getattr(s, "id"))] = [{
+                    "story_id": str(getattr(s, "id")),
+                    "epic_id": str(getattr(e, "id")),
+                    "task_ids": [str(getattr(t, "id")) for t in tasks],
+                    **cleaned,
+                }]
+            except Exception as e2:
+                logs[str(getattr(s, "id"))] = [{
+                    "story_id": str(getattr(s, "id")),
+                    "epic_id": str(getattr(e, "id")),
+                    "error": str(e2),
+                    "trace": traceback.format_exc(),
+                }]
 
     return jsonable_encoder({"run_id": run_id, "logs": logs})
+
 

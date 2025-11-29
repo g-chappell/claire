@@ -66,11 +66,14 @@ STRICT EDITING PLAYBOOK (follow in order):
    - After every change, re-read only the affected file/symbols (get_symbols_overview/find_symbol with include_body=True) to confirm.
 
 GENERAL RULES:
-- Work in the FEWEST steps needed for the current task.
-- Stay strictly within the task's scope; skip tests and broad refactors unless asked.
+- Work in the FEWEST steps needed for the current task or story.
+- When given a Story plus a list of Tasks, implement all of the tasks for that single story in one coherent sweep, respecting any depends_on and priority fields.
+- Do NOT implement tasks from other stories or epics unless explicitly instructed.
+- Stay strictly within the task or story scope; skip tests and broad refactors unless asked.
 - Prefer structured edits (symbol-level / patch) over large rewrites.
 - Keep diffs minimal and idempotent.
 """
+
 
 JsonMessage = Dict[str, Any]
 MessagesInput = List[Union[AnyMessage, JsonMessage]]
@@ -155,8 +158,7 @@ class CodingAgent:
         )
         return agent
 
-
-    async def implement_task(
+    async def implement_story(
         self,
         request: Request,
         *,
@@ -166,21 +168,29 @@ class CodingAgent:
         epic_title: str,
         story_title: str,
         story_desc: str,
-        task_title: str,
+        story_tasks: List[str],
     ) -> dict:
         """
-        Execute the FEWEST Serena steps to complete ONE task with full PV/TS/story context.
+        Execute the FEWEST Serena steps to complete ALL tasks for a single story
+        with full PV/TS/story context.
+
+        The story_tasks list should contain human-readable task titles (strings).
         Returns {output, events}.
         """
+
         agent: _AgentRunnable = await self._agent_for(request, project_dir=project_dir)
+
+        tasks_json = json.dumps(story_tasks, indent=2, ensure_ascii=False)
 
         prompt = (
             f"Product Vision (summary): {product_vision}\n"
             f"Technical Solution (stack/modules): {technical_solution}\n"
             f"Epic: {epic_title}\n"
             f"Story: {story_title} — {story_desc}\n"
-            f"Task: {task_title}\n\n"
-            "Implement ONLY this task in the fewest possible steps using Serena tools."
+            f"Story Tasks (with dependencies and priority):\n{tasks_json}\n\n"
+            "Implement ALL of these tasks for this story in the fewest possible steps using Serena tools.\n"
+            "Respect depends_on and priority_rank when choosing the order of implementation.\n"
+            "Do NOT implement tasks from other stories or epics."
         )
 
         # LangGraph-compatible input (messages in state)
@@ -225,7 +235,12 @@ class CodingAgent:
                     if attempt >= max_retries:
                         raise
                     # annotate and back off, then retry the whole stream
-                    events.append({"event": "warning", "message": f"LLM stream error (attempt {attempt+1}/{max_retries+1}): {e}. Retrying..."})
+                    events.append(
+                        {
+                            "event": "warning",
+                            "message": f"LLM stream error (attempt {attempt+1}/{max_retries+1}): {e}. Retrying...",
+                        }
+                    )
                     await _sleep_backoff(attempt, retry_base)
 
             # If we aborted mid-stream, return early with a clear message
@@ -241,7 +256,12 @@ class CodingAgent:
                 except Exception as e:
                     if attempt >= max_retries:
                         raise
-                    events.append({"event": "warning", "message": f"LLM final invoke error (attempt {attempt+1}/{max_retries+1}): {e}. Retrying..."})
+                    events.append(
+                        {
+                            "event": "warning",
+                            "message": f"LLM final invoke error (attempt {attempt+1}/{max_retries+1}): {e}. Retrying...",
+                        }
+                    )
                     await _sleep_backoff(attempt, retry_base)
 
             # Extract final assistant text (unchanged)
@@ -258,4 +278,35 @@ class CodingAgent:
             return {"output": output_text, "events": events}
         finally:
             await close_serena(request)
+
+    async def implement_task(
+        self,
+        request: Request,
+        *,
+        project_dir: str,
+        product_vision: str,
+        technical_solution: str,
+        epic_title: str,
+        story_title: str,
+        story_desc: str,
+        task_title: str,
+    ) -> dict:
+        """
+        Backwards-compatible wrapper that treats a single task as a one-task story.
+        Prefer calling implement_story with the full story_tasks list when possible.
+        """
+        # Single-task story: just pass the title as a one-element list of strings
+        story_tasks: List[str] = [task_title]
+
+        return await self.implement_story(
+            request,
+            project_dir=project_dir,
+            product_vision=product_vision,
+            technical_solution=technical_solution,
+            epic_title=epic_title,
+            story_title=story_title,
+            story_desc=story_desc,
+            story_tasks=story_tasks,
+        )
+
 

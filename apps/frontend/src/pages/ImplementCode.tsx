@@ -54,10 +54,15 @@ type ImplementResult = {
   }>;
 };
 
+// NEW: per-story status (story-level execution)
+type StoryStatus = "not_started" | "running" | "complete" | "error";
+
 const API =
   import.meta.env.VITE_API_URL?.replace(/\/+$/, "") ||
   import.meta.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, "") ||
   "http://127.0.0.1:8000";
+
+const STORY_STATE_STORAGE_KEY_PREFIX = "claire_implement_story_state_";
 
 function Badge({ children }: { children: React.ReactNode }) {
   return (
@@ -130,10 +135,12 @@ export default function ImplementCodePage() {
 
   // Live progress (SSE)
   const [streaming, setStreaming] = useState(false);
-  const [currentTaskId, setCurrentTaskId] = useState<string>("");
-  const [toolCountsByTask, setToolCountsByTask] = useState<Record<string, number>>({});
-  const [latestToolByTask, setLatestToolByTask] = useState<Record<string, string>>({});
   const [es, setEs] = useState<EventSource | null>(null);
+
+  // Per-story execution state (status + tool calls), persisted in localStorage
+  const [storyStateById, setStoryStateById] = useState<
+    Record<string, { status: StoryStatus; toolCalls: number; lastTool?: string }>
+  >({});
   
 
   // UI selections
@@ -203,6 +210,39 @@ export default function ImplementCodePage() {
       }
     })();
   }, [selectedRunId]);
+
+  // Load persisted story state whenever the selected run changes
+  useEffect(() => {
+    if (!selectedRunId) {
+      setStoryStateById({});
+      return;
+    }
+    try {
+      const key = STORY_STATE_STORAGE_KEY_PREFIX + selectedRunId;
+      const raw = window.localStorage.getItem(key);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object") {
+          setStoryStateById(parsed);
+          return;
+        }
+      }
+    } catch {
+      // ignore parse/storage errors
+    }
+    setStoryStateById({});
+  }, [selectedRunId]);
+
+  // Persist story state for the active run
+  useEffect(() => {
+    if (!selectedRunId) return;
+    try {
+      const key = STORY_STATE_STORAGE_KEY_PREFIX + selectedRunId;
+      window.localStorage.setItem(key, JSON.stringify(storyStateById));
+    } catch {
+      // ignore
+    }
+  }, [selectedRunId, storyStateById]);
 
   // --- Derived helpers from the bundle ---
   const epicTitleById = useMemo(() => {
@@ -322,31 +362,61 @@ export default function ImplementCodePage() {
     }
   }
 
+
+
   function appendLog(line: string) {
-    setLog((prev) => [...prev, `${new Date().toLocaleTimeString()} — ${line}`]);
-  }
+      setLog((prev) => [...prev, `${new Date().toLocaleTimeString()} — ${line}`]);
+    }
 
-  function bumpToolCount(taskId: string, toolName?: string) {
-    if (!taskId) return;
-    setToolCountsByTask(prev => ({ ...prev, [taskId]: (prev[taskId] ?? 0) + 1 }));
-    if (toolName) setLatestToolByTask(prev => ({ ...prev, [taskId]: toolName }));
-  }
+    // NEW: update story status
+    function setStoryStatus(storyId: string, status: StoryStatus, resetTools = false) {
+      if (!storyId) return;
+      setStoryStateById((prev) => {
+        const cur = prev[storyId] ?? { status, toolCalls: 0, lastTool: undefined };
+        return {
+          ...prev,
+          [storyId]: {
+            ...cur,
+            status,
+            toolCalls: resetTools ? 0 : cur.toolCalls,
+            lastTool: resetTools ? undefined : cur.lastTool,
+          },
+        };
+      });
+    }
 
-  // When a task completes, update per-story progress immediately
-  function markTaskFinished(storyId: string, ok: boolean) {
-    if (!storyId) return;
-    setProgressByStory(prev => {
-      const cur = prev[storyId] ?? { total: (tasksByStory.get(storyId)?.length ?? 0), ok: 0, errors: 0 };
-      return {
-        ...prev,
-        [storyId]: {
-          total: cur.total,
-          ok: cur.ok + (ok ? 1 : 0),
-          errors: cur.errors + (ok ? 0 : 1),
-        },
-      };
-    });
-  }
+    // NEW: bump tool count for this story
+    function incrementStoryTool(storyId: string, toolName?: string) {
+      if (!storyId) return;
+      setStoryStateById((prev) => {
+        const cur = prev[storyId] ?? { status: "running" as StoryStatus, toolCalls: 0, lastTool: undefined };
+        return {
+          ...prev,
+          [storyId]: {
+            ...cur,
+            toolCalls: cur.toolCalls + 1,
+            lastTool: toolName || cur.lastTool,
+          },
+        };
+      });
+    }
+
+    // When a task completes, update per-story progress immediately
+    function markTaskFinished(storyId: string, ok: boolean) {
+      if (!storyId) return;
+      setProgressByStory((prev) => {
+        const cur = prev[storyId] ?? { total: (tasksByStory.get(storyId)?.length ?? 0), ok: 0, errors: 0 };
+        return {
+          ...prev,
+          [storyId]: {
+            total: cur.total,
+            ok: cur.ok + (ok ? 1 : 0),
+            errors: cur.errors + (ok ? 0 : 1),
+          },
+        };
+      });
+    }
+
 
   // --- Execute story / full run ---
 
@@ -358,43 +428,49 @@ export default function ImplementCodePage() {
 
     // Close any previous stream before starting a new one
     if (es) {
-      try { es.close(); } catch {}
+      try {
+        es.close();
+      } catch {}
       setEs(null);
     }
 
-    const url = `${API}/code/runs/${selectedRunId}/story/${encodeURIComponent(storyId)}/implement/stream`;
+    const url = `${API}/code/runs/${selectedRunId}/story/${encodeURIComponent(
+      storyId
+    )}/implement/stream`;
 
     try {
       const source = new EventSource(url);
       setEs(source);
       setStreaming(true);
 
-      // Reset per-task diagnostics for this story
-      setToolCountsByTask({});
-      setLatestToolByTask({});
-      setCurrentTaskId("");
+      let completed = false; // <--- NEW
+
+      // story-level run starts
+      setStoryStatus(storyId, "running", true);
+      appendLog("Story streaming started…");
 
       source.onmessage = (e) => {
         try {
           const evt = JSON.parse(e.data);
 
           if (evt?.event === "on_tool_start") {
-            const tId = String(evt.task_id ?? "");
-            setCurrentTaskId(tId || "");
-            bumpToolCount(tId, evt?.name);
-            appendLog(`▶ tool: ${evt?.name || "(unknown)"} on task ${tId || "?"}`);
+            incrementStoryTool(storyId, evt?.name || evt?.tool_name);
+            appendLog(`▶ tool: ${evt?.name || evt?.tool_name || "(unknown)"}`);
           } else if (evt?.event === "on_tool_end") {
-            appendLog(`✔ tool done: ${evt?.name || "(unknown)"}`);
+            appendLog(`✔ tool done: ${evt?.name || evt?.tool_name || "(unknown)"}`);
           } else if (evt?.event === "task_complete") {
-            const tId = String(evt.task_id ?? "");
             const ok = !!evt?.ok;
             markTaskFinished(storyId, ok);
-            appendLog(`✓ task ${tId || "?"} ${ok ? "OK" : "ERROR"}`);
+            appendLog(`✓ task ${evt?.task_id ?? "?"} ${ok ? "OK" : "ERROR"}`);
           } else if (evt?.event === "story_begin") {
-            appendLog(`Story started…`);
+            setStoryStatus(storyId, "running");
+            appendLog("Story started…");
           } else if (evt?.event === "story_end") {
+            completed = true;                         // <--- NEW
             if (evt?.result) setLastResult(evt.result);
-            appendLog(`Story finished.`);
+            const status: StoryStatus = evt?.error ? "error" : "complete";
+            setStoryStatus(storyId, status);
+            appendLog(`Story finished (${status}).`);
             try { source.close(); } catch {}
             setStreaming(false);
             setBusy(false);
@@ -408,19 +484,26 @@ export default function ImplementCodePage() {
       };
 
       source.onerror = async () => {
-        appendLog("SSE failed — falling back to POST.");
+      // If we already saw story_end, this is just the browser complaining
+      // about a closed connection. Do NOT re-run via POST.
+      if (completed) {
+        appendLog("SSE connection closed after completion.");
         try { source.close(); } catch {}
         setStreaming(false);
-        // keep busy true; the fallback will conclude it
-        await onSseErrorFallback();
-      };
+        return;
+      }
 
-      return true;
-    } catch {
-      return false;
-    }
+      appendLog("SSE failed — falling back to POST.");
+      try { source.close(); } catch {}
+      setStreaming(false);
+      await onSseErrorFallback();
+    };
+
+    return true;
+  } catch {
+    return false;
   }
-
+}
 
 async function implementStoryById(storyId: string) {
   if (!selectedRunId || !storyId) return;
@@ -434,31 +517,52 @@ async function implementStoryById(storyId: string) {
 
     // Try SSE first
     const doPostFallback = async () => {
-    try {
-      const res = await fetch(
-        `${API}/code/runs/${selectedRunId}/story/${encodeURIComponent(storyId)}/implement`,
-        { method: "POST", headers: { "Content-Type": "application/json" } }
-      );
-      const data: ImplementResult = await res.json();
-      setLastResult(data);
+      try {
+        const res = await fetch(
+          `${API}/code/runs/${selectedRunId}/story/${encodeURIComponent(storyId)}/implement`,
+          { method: "POST", headers: { "Content-Type": "application/json" } }
+        );
+        const data: ImplementResult = await res.json();
+        setLastResult(data);
 
-      const total = data?.results?.length ?? 0;
-      const errors = (data?.results || []).filter((r) => r.error).length;
-      const ok = (data?.results || []).filter((r) => !r.error).length;
+        const total = data?.results?.length ?? 0;
+        const errors = (data?.results || []).filter((r) => r.error).length;
+        const ok = (data?.results || []).filter((r) => !r.error).length;
 
-      setProgressByStory((prev) => ({
-        ...prev,
-        [storyId]: { total, ok, errors },
-      }));
+        setProgressByStory((prev) => ({
+          ...prev,
+          [storyId]: { total, ok, errors },
+        }));
 
-      appendLog(`Story done — tasks: ${total}, errors: ${errors}`);
-    } catch (e: any) {
-      appendLog(`Error: ${e?.message || e}`);
-    } finally {
-      setBusy(false);
-      setWorkingStoryTitle("");
-    }
-  };
+        // Derive story-level tool calls from task diagnostics
+        let toolCalls = 0;
+        for (const r of data?.results || []) {
+          const diag = summarizeTaskDiagnostics(r);
+          toolCalls += diag.totalToolCalls;
+        }
+
+        const status: StoryStatus = errors > 0 ? "error" : "complete";
+        setStoryStateById((prev) => {
+          const cur = prev[storyId] ?? { status, toolCalls: 0, lastTool: undefined };
+          return {
+            ...prev,
+            [storyId]: {
+              ...cur,
+              status,
+              toolCalls,
+            },
+          };
+        });
+
+        appendLog(`Story done — tasks: ${total}, errors: ${errors}, tools: ${toolCalls}`);
+      } catch (e: any) {
+        appendLog(`Error: ${e?.message || e}`);
+        setStoryStatus(storyId, "error");
+      } finally {
+        setBusy(false);
+        setWorkingStoryTitle("");
+      }
+    };
 
 const sseStarted = await tryStreamStory(storyId, doPostFallback);
 if (sseStarted) {
@@ -739,8 +843,14 @@ await doPostFallback();
                           {storiesForEpic.map((s) => {
                             const sid = (s.id || s.story_id || "").toString();
                             const sRank = (s.priority_rank ?? 0) || 0;
-                            const sDeps = Array.isArray((s as any).depends_on) ? (s as any).depends_on.map((d:any) => String(d)) : [];
+                            const sDeps = Array.isArray((s as any).depends_on)
+                              ? (s as any).depends_on.map((d: any) => String(d))
+                              : [];
                             const depsTitle = sDeps.map((id: string) => storyTitleById[id] || id).join(", ");
+
+                            const state = storyStateById[sid];
+                            const status: StoryStatus = state?.status ?? "not_started";
+
                             return (
                               <button
                                 key={`${eid}-${sid}`}
@@ -755,7 +865,29 @@ await doPostFallback();
                                   setSelectedStoryId(sid);
                                 }}
                               >
-                                #{sRank || "?"} — {s.title}
+                                <span
+                                  className={`inline-flex items-center gap-1`}
+                                >
+                                  <span
+                                    className={`h-2 w-2 rounded-full ${
+                                      status === "complete"
+                                        ? "bg-emerald-400"
+                                        : status === "running"
+                                        ? "bg-amber-400 animate-pulse"
+                                        : status === "error"
+                                        ? "bg-rose-400"
+                                        : "bg-slate-500"
+                                    }`}
+                                  />
+                                  <span>
+                                    #{sRank || "?"} — {s.title}
+                                  </span>
+                                  {state?.toolCalls ? (
+                                    <span className="text-[10px] text-slate-300">
+                                      · {state.toolCalls} tools
+                                    </span>
+                                  ) : null}
+                                </span>
                                 {sDeps.length ? (
                                   <span className="ml-1 rounded bg-amber-800/60 px-1.5 py-0.5 text-[10px]">
                                     deps:{sDeps.length}
@@ -785,15 +917,26 @@ await doPostFallback();
             const epicName = s?.epic_title || (s?.epic_id ? epicTitleById[s.epic_id] : "");
             const sDeps = Array.isArray((s as any)?.depends_on) ? (s as any).depends_on.map((d:any) => String(d)) : [];
             const p = pr.total > 0 ? Math.round((pr.ok / pr.total) * 100) : 0;
+            const storyState = storyStateById[selectedStoryId] || ({ status: "not_started", toolCalls: 0 } as const);
 
             return (
               <div className="space-y-3">
                 <div className="mb-1 text-sm text-slate-400">{epicName}</div>
                 <div className="text-xl font-semibold">{s?.title}</div>
 
-                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-400">
                   {s?.epic_id && epicRankById[s.epic_id] ? <Badge>Epic #{epicRankById[s.epic_id]}</Badge> : null}
                   {typeof s?.priority_rank === "number" ? <Badge>Story #{s?.priority_rank}</Badge> : null}
+                  <Badge>
+                    Status:&nbsp;
+                    {{
+                      not_started: "Not started",
+                      running: "Running",
+                      complete: "Complete",
+                      error: "Error",
+                    }[storyState.status]}
+                  </Badge>
+                  <Badge>Tool calls: {storyState.toolCalls}</Badge>
                     {sDeps.length ? (
                       <div className="flex flex-wrap items-center gap-1">
                         <span className="text-slate-400">Depends on:</span>
@@ -821,6 +964,7 @@ await doPostFallback();
                   <Badge>Tasks: {t.length}</Badge>
                   <Badge>Done: {pr.ok}</Badge>
                   {pr.errors ? <Badge>Errors: {pr.errors}</Badge> : null}
+                  
                 </div>
                 <div className="h-1.5 w-full overflow-hidden rounded bg-slate-800">
                   <div className="h-1.5 bg-emerald-500" style={{ width: `${p}%` }} />
@@ -843,52 +987,27 @@ await doPostFallback();
                         <tr>
                           <th className="px-3 py-2 text-left">Order</th>
                           <th className="px-3 py-2 text-left">Title</th>
-                          <th className="px-3 py-2 text-left">Status</th>
-                          <th className="px-3 py-2 text-left">Tool Calls</th>
-                          <th className="px-3 py-2 text-left">Latest Tool</th>
                         </tr>
                       </thead>
                       <tbody className="bg-slate-900/40 text-slate-300">
-                        {t.map((task, idx) => {
-                          const rid = lastResult?.results?.find(
-                            (r) => (r.task_id || "") === (task.task_id || task.id)
-                          );
-                          let diag = rid ? summarizeTaskDiagnostics(rid) : { totalToolCalls: 0, latestName: "" };
-                          const liveCalls = toolCountsByTask[task.task_id || task.id || ""] ?? 0;
-                          const liveLatest = latestToolByTask[task.task_id || task.id || ""];
-                          if (streaming && (liveCalls > 0 || liveLatest)) {
-                            diag = {
-                              totalToolCalls: Math.max(diag.totalToolCalls, liveCalls),
-                              latestName: liveLatest || diag.latestName,
-                            };
-                          }
-                          const isLive = streaming && (currentTaskId === (task.task_id || task.id));
-                          const status = isLive ? "Working…" : rid ? (rid.error ? "Error" : "OK") : "—";
-
-                          return (
-                            <tr key={`${task.task_id || task.id || Math.random()}`} className="border-t border-slate-800">
-                              <td className="px-3 py-2">{task.order ?? idx + 1}</td>
-                              <td className="px-3 py-2">
-                                {coerceTextLike(task.title) || coerceTextLike(task.description) || "(task)"}
-                              </td>
-                              <td className="px-3 py-2">
-                                {status === "OK" ? (
-                                  <span className="rounded-md bg-emerald-800/50 px-2 py-0.5 text-emerald-200">OK</span>
-                                ) : status === "Error" ? (
-                                  <span className="rounded-md bg-rose-800/40 px-2 py-0.5 text-rose-200">Error</span>
-                                ) : (
-                                  <span className="rounded-md bg-slate-800/50 px-2 py-0.5 text-slate-300">—</span>
-                                )}
-                              </td>
-                              <td className="px-3 py-2">{diag.totalToolCalls}</td>
-                              <td className="px-3 py-2 font-mono">{diag.latestName || "—"}</td>
-                            </tr>
-                          );
-                        })}
+                        {t.map((task, idx) => (
+                          <tr
+                            key={`${task.task_id || task.id || idx}`}
+                            className="border-t border-slate-800"
+                          >
+                            <td className="px-3 py-2">{task.order ?? idx + 1}</td>
+                            <td className="px-3 py-2">
+                              {coerceTextLike(task.title) ||
+                                coerceTextLike(task.description) ||
+                                "(task)"}
+                            </td>
+                          </tr>
+                        ))}
                       </tbody>
                     </table>
                   </div>
                 )}
+
               </div>
             );
           })()}

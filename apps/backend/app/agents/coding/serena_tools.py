@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, asyncio
+import os, asyncio, anyio
 from typing import Any, Callable, Dict, List, Optional, cast
 from fastapi import Request
 from pydantic import BaseModel, Field
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 class _InsertTextArgs(BaseModel):
     relative_path: str
     name_path: str
-    text_to_insert: str
+    body: str = Field(..., description="Text body to insert before/after the symbol.")
 
 def _resolve_executable(cmd0: str) -> str:
     """
@@ -134,7 +134,7 @@ async def get_serena_tools(request: Request, project_dir: Optional[str] = None) 
             # Sanity: warn if write-capable tools are missing (agent won't be able to edit)
             required_writes = {
                 "create_text_file",
-                "replace_regex",
+                "replace_content",
                 "insert_after_symbol",
                 "insert_before_symbol",
                 "replace_symbol_body",
@@ -158,10 +158,14 @@ async def get_serena_tools(request: Request, project_dir: Optional[str] = None) 
                     p = path.lower()
                     base = os.path.splitext(os.path.basename(path))[0]
                     ident = "".join(part.title() for part in base.replace("-", " ").replace("_", " ").split())
-                    if p.endswith(".ts"):  return f"/** Auto-stub */\nexport class {ident} {{}}\n"
-                    if p.endswith(".tsx"): return f"/** Auto-stub */\nexport default function {ident}(){{return null;}}\n"
-                    if p.endswith(".js"):  return "// Auto-stub\n"
-                    if p.endswith(".md"):  return f"# {ident}\n"
+                    if p.endswith(".ts"):
+                        return f"/** Auto-stub */\nexport class {ident} {{}}\n"
+                    if p.endswith(".tsx"):
+                        return f"/** Auto-stub */\nexport default function {ident}(){{return null;}}\n"
+                    if p.endswith(".js"):
+                        return "// Auto-stub\n"
+                    if p.endswith(".md"):
+                        return f"# {ident}\n"
                     return "\n"
 
                 async def _create_text_file_safe(relative_path: str, content: Optional[str] = None):
@@ -172,21 +176,29 @@ async def get_serena_tools(request: Request, project_dir: Optional[str] = None) 
                     if hasattr(orig_create_tool, "ainvoke"):
                         return await getattr(orig_create_tool, "ainvoke")(payload)  # type: ignore
                     if hasattr(orig_create_tool, "arun"):
-                        return await getattr(orig_create_tool, "arun")(payload)     # type: ignore
+                        return await getattr(orig_create_tool, "arun")(payload)  # type: ignore
                     if hasattr(orig_create_tool, "invoke"):
-                        return getattr(orig_create_tool, "invoke")(payload)        # type: ignore
+                        return getattr(orig_create_tool, "invoke")(payload)  # type: ignore
                     if hasattr(orig_create_tool, "run"):
-                        return getattr(orig_create_tool, "run")(payload)           # type: ignore
+                        return getattr(orig_create_tool, "run")(payload)  # type: ignore
                     raise RuntimeError("create_text_file tool has no callable interface")
+
+                def _create_text_file_safe_sync(relative_path: str, content: Optional[str] = None):
+                    async def _runner():
+                        return await _create_text_file_safe(relative_path=relative_path, content=content)
+
+                    return anyio.run(_runner)
 
                 tools.append(
                     StructuredTool.from_function(
-                        func=_create_text_file_safe,
+                        func=_create_text_file_safe_sync,
+                        coroutine=_create_text_file_safe,
                         name="create_text_file",
                         description="Create a new text file. If 'content' is omitted, writes a minimal, valid stub.",
                         args_schema=_CreateArgs,
                     )
                 )
+
             # ---------------------------------------------
             
 
@@ -266,14 +278,36 @@ async def get_serena_tools(request: Request, project_dir: Optional[str] = None) 
                     depth: Optional[int] = 0,
                 ):
                     np = _normalize_name_path(name_path)
-                    payload = {"name_path": np, "include_body": bool(include_body), "depth": int(depth or 0)}
+                    # Serena MCP expects `name_path_pattern` in applyArguments
+                    payload = {
+                        "name_path_pattern": np,
+                        "include_body": bool(include_body),
+                        "depth": int(depth or 0),
+                    }
                     if relative_path:
                         payload["relative_path"] = relative_path
                     return await _call(_find_symbol, payload)
 
+                def _find_symbol_safe_sync(
+                    name_path: str,
+                    relative_path: Optional[str] = None,
+                    include_body: Optional[bool] = False,
+                    depth: Optional[int] = 0,
+                ):
+                    async def _runner():
+                        return await _find_symbol_safe(
+                            name_path=name_path,
+                            relative_path=relative_path,
+                            include_body=include_body,
+                            depth=depth,
+                        )
+
+                    return anyio.run(_runner)
+
                 tools.append(
                     StructuredTool.from_function(
-                        func=_find_symbol_safe,
+                        func=_find_symbol_safe_sync,
+                        coroutine=_find_symbol_safe,
                         name="find_symbol",
                         description="Find a symbol by normalized name_path; accepts dotted or slashed paths.",
                         args_schema=_FindArgs,
@@ -284,38 +318,67 @@ async def get_serena_tools(request: Request, project_dir: Optional[str] = None) 
             if _insert_after_symbol:
                 tools = [t for t in tools if getattr(t, "name", "") != "insert_after_symbol"]
 
-                async def _insert_after_symbol_safe(relative_path: str, name_path: str, text_to_insert: str):
+                async def _insert_after_symbol_safe(relative_path: str, name_path: str, body: str):
                     np = _normalize_name_path(name_path)
-                    return await _call(_insert_after_symbol, {
-                        "relative_path": relative_path,
-                        "name_path": np,
-                        "text_to_insert": text_to_insert,
-                    })
+                    return await _call(
+                        _insert_after_symbol,
+                        {
+                            "relative_path": relative_path,
+                            "name_path": np,
+                            "body": body,
+                        },
+                    )
+
+                def _insert_after_symbol_safe_sync(relative_path: str, name_path: str, body: str):
+                    async def _runner():
+                        return await _insert_after_symbol_safe(
+                            relative_path=relative_path,
+                            name_path=name_path,
+                            body=body,
+                        )
+
+                    return anyio.run(_runner)
 
                 tools.append(
                     StructuredTool.from_function(
-                        func=_insert_after_symbol_safe,
+                        func=_insert_after_symbol_safe_sync,
+                        coroutine=_insert_after_symbol_safe,
                         name="insert_after_symbol",
                         description="Insert text after a normalized symbol path.",
                         args_schema=_InsertTextArgs,
                     )
                 )
 
+
             # ---- Wrap insert_before_symbol to normalize name_path -----------------------
             if _insert_before_symbol:
                 tools = [t for t in tools if getattr(t, "name", "") != "insert_before_symbol"]
 
-                async def _insert_before_symbol_safe(relative_path: str, name_path: str, text_to_insert: str):
+                async def _insert_before_symbol_safe(relative_path: str, name_path: str, body: str):
                     np = _normalize_name_path(name_path)
-                    return await _call(_insert_before_symbol, {
-                        "relative_path": relative_path,
-                        "name_path": np,
-                        "text_to_insert": text_to_insert,
-                    })
+                    return await _call(
+                        _insert_before_symbol,
+                        {
+                            "relative_path": relative_path,
+                            "name_path": np,
+                            "body": body,
+                        },
+                    )
+
+                def _insert_before_symbol_safe_sync(relative_path: str, name_path: str, body: str):
+                    async def _runner():
+                        return await _insert_before_symbol_safe(
+                            relative_path=relative_path,
+                            name_path=name_path,
+                            body=body,
+                        )
+
+                    return anyio.run(_runner)
 
                 tools.append(
                     StructuredTool.from_function(
-                        func=_insert_before_symbol_safe,
+                        func=_insert_before_symbol_safe_sync,
+                        coroutine=_insert_before_symbol_safe,
                         name="insert_before_symbol",
                         description="Insert text before a normalized symbol path.",
                         args_schema=_InsertTextArgs,  # reuse same schema
@@ -338,30 +401,36 @@ async def get_serena_tools(request: Request, project_dir: Optional[str] = None) 
                     symbol_exists = False
                     if _find_symbol:
                         try:
-                            res = await _call(_find_symbol, {
-                                "relative_path": relative_path,
-                                "name_path": np,
-                                "include_body": False,
-                                "depth": 0,
-                            })
+                            res = await _call(
+                                _find_symbol,
+                                {
+                                    "relative_path": relative_path,
+                                    "name_path_pattern": np,  # Serena expects name_path_pattern
+                                    "include_body": False,
+                                    "depth": 0,
+                                },
+                            )
                             candidates = res.get("symbols") if isinstance(res, dict) else res
                             symbol_exists = bool(candidates)
                         except Exception as e:
                             logger.warning("find_symbol probe failed: %s", e)
 
-                    # Fast path if it exists
+                    # Fast path if it exists: call Serena's replace_symbol_body with 'body'
                     if symbol_exists:
                         try:
-                            return await _call(_replace_symbol_body, {
-                                "relative_path": relative_path,
-                                "name_path": np,
-                                "new_body": new_body,
-                            })
+                            return await _call(
+                                _replace_symbol_body,
+                                {
+                                    "relative_path": relative_path,
+                                    "name_path": np,
+                                    "body": new_body,  # ← key fix: use 'body', not 'new_body'
+                                },
+                            )
                         except Exception as e:
                             logger.warning("replace_symbol_body failed despite symbol existing: %s", e)
 
-                    # Fallbacks…
-                    text_to_insert = f"\n{new_body}\n"
+                    # Fallbacks – best-effort insert of the new body somewhere sensible
+                    body = f"\n{new_body}\n"
 
                     # After last top-level symbol
                     last_name_path: Optional[str] = None
@@ -375,15 +444,18 @@ async def get_serena_tools(request: Request, project_dir: Optional[str] = None) 
                         except Exception as e:
                             logger.warning("get_symbols_overview failed: %s", e)
 
-                    if last_name_path and _insert_after_symbol:
-                        try:
-                            return await _call(_insert_after_symbol, {
-                                "relative_path": relative_path,
-                                "name_path": last_name_path,
-                                "text_to_insert": text_to_insert,
-                            })
-                        except Exception as e:
-                            logger.warning("insert_after_symbol fallback failed: %s", e)
+                        if last_name_path and _insert_after_symbol:
+                            try:
+                                return await _call(
+                                    _insert_after_symbol,
+                                    {
+                                        "relative_path": relative_path,
+                                        "name_path": last_name_path,
+                                        "body": body,
+                                    },
+                                )
+                            except Exception as e:
+                                logger.warning("insert_after_symbol fallback failed: %s", e)
 
                     # Before first top-level symbol
                     if _get_symbols_overview and _insert_before_symbol:
@@ -394,32 +466,43 @@ async def get_serena_tools(request: Request, project_dir: Optional[str] = None) 
                                 first = syms[0]
                                 first_np = first.get("name_path") if isinstance(first, dict) else None
                                 if first_np:
-                                    return await _call(_insert_before_symbol, {
-                                        "relative_path": relative_path,
-                                        "name_path": first_np,
-                                        "text_to_insert": text_to_insert,
-                                    })
+                                    return await _call(
+                                        _insert_before_symbol,
+                                        {
+                                            "relative_path": relative_path,
+                                            "name_path": first_np,
+                                            "body": body,
+                                        },
+                                    )
                         except Exception as e:
                             logger.warning("insert_before_symbol fallback failed: %s", e)
 
-                    # Append at EOF
-                    _append = _get("replace_regex") or None
+                    # Append at EOF using replace_content (needle/repl/mode)
+                    _append = _get("replace_content") or None
                     _read_file = _get("read_file") or None
                     if _append and _read_file:
                         try:
+                            # Ensure the file exists
                             try:
                                 await _call(_read_file, {"relative_path": relative_path})
                             except Exception:
                                 _create = _get("create_text_file")
                                 if _create:
-                                    await _call(_create, {"relative_path": relative_path, "content": ""})
+                                    await _call(
+                                        _create,
+                                        {"relative_path": relative_path, "content": ""},
+                                    )
 
-                            await _call(_append, {
-                                "relative_path": relative_path,
-                                "regex": r"\Z",
-                                "replacement": f"\n{new_body}\n",
-                                "allow_multiple_occurrences": False
-                            })
+                            # Serena replace_content schema: needle / repl / mode
+                            await _call(
+                                _append,
+                                {
+                                    "relative_path": relative_path,
+                                    "needle": r"\Z",
+                                    "repl": f"\n{new_body}\n",
+                                    "mode": "regex",
+                                },
+                            )
                             return {"status": "ok", "fallback": "append_eof"}
                         except Exception as e:
                             logger.warning("append_eof fallback failed: %s", e)
@@ -428,9 +511,20 @@ async def get_serena_tools(request: Request, project_dir: Optional[str] = None) 
                         f"Symbol '{np}' not found in {relative_path}; replace failed and fallbacks could not insert."
                     )
 
+                def _replace_symbol_body_safe_sync(relative_path: str, name_path: str, new_body: str):
+                    async def _runner():
+                        return await _replace_symbol_body_safe(
+                            relative_path=relative_path,
+                            name_path=name_path,
+                            new_body=new_body,
+                        )
+
+                    return anyio.run(_runner)
+
                 tools.append(
                     StructuredTool.from_function(
-                        func=_replace_symbol_body_safe,
+                        func=_replace_symbol_body_safe_sync,
+                        coroutine=_replace_symbol_body_safe,
                         name="replace_symbol_body",
                         description=(
                             "Replace the body of a symbol by normalized name_path. "
@@ -451,15 +545,29 @@ async def get_serena_tools(request: Request, project_dir: Optional[str] = None) 
 
                 async def _rename_symbol_safe(relative_path: str, name_path: str, new_name: str):
                     np = _normalize_name_path(name_path)
-                    return await _call(_rename_symbol, {
-                        "relative_path": relative_path,
-                        "name_path": np,
-                        "new_name": new_name,
-                    })
+                    return await _call(
+                        _rename_symbol,
+                        {
+                            "relative_path": relative_path,
+                            "name_path": np,
+                            "new_name": new_name,
+                        },
+                    )
+
+                def _rename_symbol_safe_sync(relative_path: str, name_path: str, new_name: str):
+                    async def _runner():
+                        return await _rename_symbol_safe(
+                            relative_path=relative_path,
+                            name_path=name_path,
+                            new_name=new_name,
+                        )
+
+                    return anyio.run(_runner)
 
                 tools.append(
                     StructuredTool.from_function(
-                        func=_rename_symbol_safe,
+                        func=_rename_symbol_safe_sync,
+                        coroutine=_rename_symbol_safe,
                         name="rename_symbol",
                         description="Rename a symbol (normalized name_path).",
                         args_schema=_RenameArgs,
@@ -481,9 +589,19 @@ async def get_serena_tools(request: Request, project_dir: Optional[str] = None) 
                         payload["relative_path"] = relative_path
                     return await _call(_find_refs, payload)
 
+                def _find_referencing_symbols_safe_sync(name_path: str, relative_path: Optional[str] = None):
+                    async def _runner():
+                        return await _find_referencing_symbols_safe(
+                            name_path=name_path,
+                            relative_path=relative_path,
+                        )
+
+                    return anyio.run(_runner)
+
                 tools.append(
                     StructuredTool.from_function(
-                        func=_find_referencing_symbols_safe,
+                        func=_find_referencing_symbols_safe_sync,
+                        coroutine=_find_referencing_symbols_safe,
                         name="find_referencing_symbols",
                         description="Find references to a symbol (normalized name_path).",
                         args_schema=_FindRefsArgs,
