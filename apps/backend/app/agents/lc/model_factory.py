@@ -72,7 +72,7 @@ def make_chat_model(
     if max_retries is None:
         max_retries = int(os.getenv("LLM_MAX_RETRIES", "6"))
     if timeout is None:
-        timeout = float(os.getenv("LLM_TIMEOUT", "60"))
+        timeout = float(os.getenv("LLM_TIMEOUT", "180"))
 
     env_model = os.getenv("LLM_MODEL")
     chosen = model or env_model or ("claude-sonnet-4-5-20250929" if provider == "anthropic" else "gpt-4o-mini")
