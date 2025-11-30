@@ -48,7 +48,7 @@ export default function PlanView() {
       <div className="flex items-center gap-3">
         <RunPicker value={runId} onChange={setRunId} />
         <button
-          className="px-4 py-2 rounded bg-slate-700 hover:bg-slate-600 disabled:opacity-50"
+          className="inline-flex items-center px-4 py-2 rounded-md bg-indigo-600 text-white font-medium shadow-sm hover:bg-indigo-500 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1"
           disabled={!runId || busy}
           onClick={fetchPlan}
         >
@@ -113,7 +113,7 @@ export default function PlanView() {
                   <p className="opacity-80 mb-3">{e.description}</p>
                   <div className="space-y-3">
                     {(storiesByEpic[e.id] ?? []).map(st => (
-                      <div key={st.id} className="border border-slate-700 rounded-lg p-3">
+                      <div key={st.id} className="border border-slate-200 bg-white rounded-lg p-3 shadow-sm">
                         <div className="flex justify-between mb-1">
                           <div className="font-semibold">[{st.priority_rank}] {st.title}</div>
                           <code className="opacity-60">{st.id}</code>
@@ -134,7 +134,10 @@ export default function PlanView() {
                             <div className="opacity-70 text-sm mt-3 mb-1">Acceptance (Gherkin)</div>
                             <div className="grid gap-2">
                               {st.acceptance.map((ac, i) => (
-                                <pre key={i} className="bg-slate-950/60 border border-slate-800 rounded p-3 whitespace-pre-wrap">
+                                <pre
+                                  key={i}
+                                  className="bg-slate-50 border border-slate-200 rounded-md p-3 whitespace-pre-wrap text-slate-900"
+                                >
                                   {ac.gherkin}
                                 </pre>
                               ))}
@@ -167,12 +170,15 @@ export default function PlanView() {
             <Collapsible title="Design Notes">
               <div className="grid md:grid-cols-2 gap-3">
                 {designNotes.map((dn) => (
-                  <div key={dn.id} className="border border-slate-700 rounded-lg p-3">
+                  <div key={dn.id} className="border border-slate-200 bg-white rounded-lg p-3 shadow-sm">
                     <div className="flex justify-between">
                       <div className="font-semibold">{dn.title}</div>
                       <span className="text-xs opacity-70">{dn.kind}</span>
                     </div>
-                    <div className="prose prose-invert mt-2" dangerouslySetInnerHTML={{__html: dn.body_md.replace(/\n/g,"<br/>")}} />
+                    <div
+                      className="prose mt-2"
+                      dangerouslySetInnerHTML={{ __html: dn.body_md.replace(/\n/g, "<br/>") }}
+                    />
                   </div>
                 ))}
               </div>

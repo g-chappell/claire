@@ -1,18 +1,18 @@
-import "highlight.js/styles/atom-one-dark.css";
+import "highlight.js/styles/atom-one-light.css";
 
 import { NavLink, Outlet } from "react-router-dom";
 
 import { useChat } from "./useChat";
 
-const link = "block px-4 py-2 rounded hover:bg-slate-800";
-const active = "bg-slate-800";
+const link = "block px-4 py-2 rounded hover:bg-slate-100 text-slate-700";
+const active = "bg-slate-200 font-semibold";
 
 export default function App() {
   const chat = useChat();
 
   return (
-    <div className="min-h-screen grid grid-cols-[240px_1fr] bg-slate-950 text-slate-100">
-      <aside className="border-r border-slate-800 p-4 space-y-4">
+    <div className="min-h-screen grid grid-cols-[240px_1fr] bg-slate-50 text-slate-900">
+      <aside className="border-r border-slate-200 bg-white p-4 space-y-4 shadow-sm">
         <div className="text-xl font-bold">CLAIRE</div>
         <nav className="space-y-2">
           <NavLink to="/chat" className={({isActive})=> `${link} ${isActive?active:""}`}>Chat</NavLink>
@@ -34,7 +34,7 @@ export default function App() {
           <NavLink to="/settings" className={({isActive})=> `${link} ${isActive?active:""}`}>Settings</NavLink>
         </nav>
       </aside>
-      <main className="p-6">
+      <main className="p-6 bg-slate-50">
         <Outlet context={chat}/>
       </main>
     </div>

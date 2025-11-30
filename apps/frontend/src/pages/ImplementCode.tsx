@@ -66,7 +66,7 @@ const STORY_STATE_STORAGE_KEY_PREFIX = "claire_implement_story_state_";
 
 function Badge({ children }: { children: React.ReactNode }) {
   return (
-    <span className="inline-flex items-center rounded-full border border-slate-700 bg-slate-800/60 px-2 py-0.5 text-xs text-slate-200">
+    <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-xs text-slate-800 font-medium">
       {children}
     </span>
   );
@@ -87,7 +87,7 @@ function DepChip({
       type="button"
       onClick={onClick}
       title={title}
-      className="inline-flex items-center gap-1 rounded-md border border-amber-600/60 bg-amber-900/20 px-2 py-0.5 text-xs text-amber-200 hover:bg-amber-900/30"
+      className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs text-amber-800 hover:bg-amber-100"
     >
       <span aria-hidden>🔗</span>
       {label}
@@ -105,7 +105,7 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-xl border border-slate-700 bg-slate-900 p-4">
+    <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
       <div className="mb-2 flex items-center justify-between">
         <h2 className="text-lg font-semibold">{title}</h2>
         {right ? <div className="flex items-center gap-2">{right}</div> : null}
@@ -654,11 +654,11 @@ await doPostFallback();
         <h1 className="text-2xl font-bold">Implement Code</h1>
         <Badge>API: {API}</Badge>
       </div>
-        {(busy || streaming) && (
-          <div className="rounded-xl border border-amber-600 bg-amber-900/30 p-3 text-amber-200">
-            Working on: <span className="font-semibold">{workingStoryTitle || "story…"}</span>
-          </div>
-        )}
+          {(busy || streaming) && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-amber-800">
+              Working on: <span className="font-semibold">{workingStoryTitle || "story…"}</span>
+            </div>
+          )}
 
       <Section
         title="Select Run"
@@ -667,7 +667,7 @@ await doPostFallback();
             <button
               onClick={executeWholeRun}
               disabled={!selectedRunId || busy}
-              className="rounded-xl bg-slate-800 px-3 py-1.5 text-slate-100 hover:bg-slate-700 disabled:opacity-50"
+              className="inline-flex items-center rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-indigo-500 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1"
               title="Execute entire plan (all stories & tasks)"
             >
               Execute Plan
@@ -675,7 +675,7 @@ await doPostFallback();
             <button
               onClick={handleListTools}
               disabled={!selectedRunId || loadingTools}
-              className="rounded-xl border border-slate-700 bg-slate-900 px-3 py-1.5 text-slate-100 hover:bg-slate-800 disabled:opacity-50"
+              className="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 hover:border-slate-400 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-slate-300 focus:ring-offset-1"
               title="Show Serena's bound tools"
             >
               {loadingTools ? "Loading tools..." : "List Tools"}
@@ -685,7 +685,7 @@ await doPostFallback();
       >
         <div className="flex flex-wrap items-center gap-3">
           <select
-            className="rounded-xl border border-slate-700 bg-slate-800 px-3 py-1.5 text-slate-100"
+            className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
             value={selectedRunId}
             onChange={(e) => setSelectedRunId(e.target.value)}
           >
@@ -703,14 +703,14 @@ await doPostFallback();
         </div>
 
         {!!tools.length && (
-          <div className="mt-3 rounded-xl border border-slate-800 bg-slate-900/60 p-3">
+          <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
             <div className="mb-1 text-sm font-semibold">Serena Tools</div>
             <div className="flex flex-wrap gap-2">
               {tools.map((n) => (
-                <span
-                  key={n}
-                  className="rounded-md border border-slate-700 bg-slate-800/60 px-2 py-0.5 text-xs text-slate-200 font-mono"
-                >
+                  <span
+                    key={n}
+                    className="rounded-md border border-slate-200 bg-white px-2 py-0.5 text-xs text-slate-800 font-mono"
+                  >
                   {n}
                 </span>
               ))}
@@ -722,10 +722,10 @@ await doPostFallback();
       <Section title="Epics & Stories">
         <div className="grid gap-3 md:grid-cols-3">
           {/* Epic select */}
-          <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-3">
-            <div className="mb-2 text-sm text-slate-300">Select Epic</div>
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+          <div className="mb-2 text-sm text-slate-700">Select Epic</div>
             <select
-              className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-1.5 text-slate-100"
+              className="w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
               value={selectedEpic}
               onChange={(e) => {
                 setSelectedEpic(e.target.value);
@@ -745,10 +745,10 @@ await doPostFallback();
           </div>
 
           {/* Story select */}
-          <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-3">
-            <div className="mb-2 text-sm text-slate-300">Select Story</div>
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <div className="mb-2 text-sm text-slate-700">Select Story</div>
             <select
-              className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-1.5 text-slate-100"
+              className="w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
               value={selectedStoryId}
               onChange={(e) => setSelectedStoryId(e.target.value)}
             >
@@ -768,7 +768,7 @@ await doPostFallback();
                 <button
                   onClick={() => implementStoryById(selectedStoryId)}
                   disabled={!selectedRunId || busy}
-                  className="rounded-xl bg-slate-800 px-3 py-1.5 text-slate-100 hover:bg-slate-700 disabled:opacity-50"
+                  className="inline-flex items-center rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-indigo-500 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1"
                 >
                   Implement Selected Story
                 </button>
@@ -777,14 +777,14 @@ await doPostFallback();
           </div>
 
           {/* Progress */}
-          <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-3">
-            <div className="mb-2 text-sm text-slate-300">Story Progress</div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <div className="mb-2 text-sm text-slate-700">Story Progress</div>
             {selectedStoryId ? (
               <>
                 <div className="text-xs text-slate-400">
                   {selectedProgress.ok}/{selectedProgress.total} complete • {selectedProgress.errors} errors
                 </div>
-                <div className="mt-2 h-2 w-full overflow-hidden rounded bg-slate-800">
+                <div className="mt-2 h-2 w-full overflow-hidden rounded bg-slate-200">
                   <div className="h-2 bg-emerald-500" style={{ width: `${pct}%` }} />
                 </div>
               </>
@@ -797,29 +797,29 @@ await doPostFallback();
 
       {/* High-level execution order */}
       <Section title="Implementation Plan">
-          <div className="overflow-x-auto rounded-xl border border-slate-800">
+          <div className="overflow-x-auto rounded-xl border border-slate-200">
             <table className="min-w-full text-sm">
-              <thead className="bg-slate-800/60 text-slate-200">
+              <thead className="bg-slate-100 text-slate-900">
                 <tr>
                   <th className="px-3 py-2 text-left">Order</th>
                   <th className="px-3 py-2 text-left">Epic</th>
                   <th className="px-3 py-2 text-left">Stories (ordered)</th>
                 </tr>
               </thead>
-              <tbody className="bg-slate-900/40 text-slate-300">
+              <tbody className="bg-white text-slate-700">
                 {epicsOrdered.map((e, i) => {
                   const eid = ((e as any).id ?? "").toString();
                   const erank = (e as any).priority_rank ?? i + 1;
                   const eDeps = Array.isArray((e as any).depends_on) ? (e as any).depends_on.map((d:any) => String(d)) : [];
                   const storiesForEpic = storiesByEpicOrdered.get(eid) || [];
                   return (
-                    <tr key={eid || e.title} className="border-t border-slate-800 align-top">
+                    <tr key={eid || e.title} className="border-t border-slate-200 align-top">
                       <td className="px-3 py-2">#{erank}</td>
                       <td className="px-3 py-2">
                         <div className="font-medium flex items-center gap-2">
                           <span>{e.title}</span>
                           {eDeps.length ? (
-                            <span className="rounded bg-amber-800/60 px-1.5 py-0.5 text-[10px]">deps:{eDeps.length}</span>
+                            <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-800 border border-amber-200">deps:{eDeps.length}</span>
                           ) : null}
                         </div>
                         {eDeps.length ? (
@@ -856,9 +856,11 @@ await doPostFallback();
                                 key={`${eid}-${sid}`}
                                 className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs ${
                                   sDeps.length
-                                    ? "border-amber-600/70 bg-amber-900/20 text-amber-200 hover:bg-amber-900/30"
-                                    : "border-slate-700 bg-slate-800/60 text-slate-200 hover:bg-slate-800"
-                                } ${selectedStoryId === sid ? "ring-1 ring-slate-400/50" : ""} ${depsOfSelected.has(sid) ? "ring-1 ring-amber-400/60" : ""}`}
+                                    ? "border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100"
+                                    : "border-slate-200 bg-slate-50 text-slate-800 hover:bg-slate-100"
+                                } ${selectedStoryId === sid ? "ring-1 ring-slate-300" : ""} ${
+                                  depsOfSelected.has(sid) ? "ring-1 ring-amber-300" : ""
+                                }`}
                                 title={sDeps.length ? `Depends on: ${depsTitle}` : "No declared dependencies"}
                                 onClick={() => {
                                   setSelectedEpic(eid);
@@ -889,7 +891,7 @@ await doPostFallback();
                                   ) : null}
                                 </span>
                                 {sDeps.length ? (
-                                  <span className="ml-1 rounded bg-amber-800/60 px-1.5 py-0.5 text-[10px]">
+                                  <span className="ml-1 rounded bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-800 border border-amber-200">
                                     deps:{sDeps.length}
                                   </span>
                                 ) : null}
@@ -909,7 +911,7 @@ await doPostFallback();
         {/* Focus view for the chosen story */}
         <Section title="Selected Story">
           {!selectedStoryId ? (
-            <div className="text-slate-400">Select an epic and story above to view details and implement.</div>
+            <div className="text-slate-500">Select an epic and story above to view details and implement.</div>
           ) : (() => {
             const s = stories.find((st) => (st.id || st.story_id)?.toString() === selectedStoryId);
             const t = selectedTasks;
@@ -921,10 +923,10 @@ await doPostFallback();
 
             return (
               <div className="space-y-3">
-                <div className="mb-1 text-sm text-slate-400">{epicName}</div>
+                <div className="mb-1 text-sm text-slate-600">{epicName}</div>
                 <div className="text-xl font-semibold">{s?.title}</div>
 
-                  <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
                   {s?.epic_id && epicRankById[s.epic_id] ? <Badge>Epic #{epicRankById[s.epic_id]}</Badge> : null}
                   {typeof s?.priority_rank === "number" ? <Badge>Story #{s?.priority_rank}</Badge> : null}
                   <Badge>
@@ -958,7 +960,7 @@ await doPostFallback();
                     ) : null}
                 </div>
 
-                {s?.description && <div className="text-sm text-slate-300">{s.description}</div>}
+                {s?.description && <div className="text-sm text-slate-700">{s.description}</div>}
 
                 <div className="flex items-center gap-2">
                   <Badge>Tasks: {t.length}</Badge>
@@ -966,34 +968,34 @@ await doPostFallback();
                   {pr.errors ? <Badge>Errors: {pr.errors}</Badge> : null}
                   
                 </div>
-                <div className="h-1.5 w-full overflow-hidden rounded bg-slate-800">
-                  <div className="h-1.5 bg-emerald-500" style={{ width: `${p}%` }} />
-                </div>
+                  <div className="h-1.5 w-full overflow-hidden rounded bg-slate-200">
+                    <div className="h-1.5 bg-emerald-500" style={{ width: `${p}%` }} />
+                  </div>
 
                 <div>
                   <button
                     onClick={() => implementStoryById(selectedStoryId)}
                     disabled={!selectedRunId || busy}
-                    className="rounded-xl bg-slate-800 px-3 py-1.5 text-slate-100 hover:bg-slate-700 disabled:opacity-50"
+                    className="inline-flex items-center rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-indigo-500 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1"
                   >
                     Implement Selected Story
                   </button>
                 </div>
 
                 {!!t.length && (
-                  <div className="overflow-x-auto rounded-lg border border-slate-800">
+                  <div className="overflow-x-auto rounded-lg border border-slate-200">
                     <table className="min-w-full text-sm">
-                      <thead className="bg-slate-800/60 text-slate-200">
+                      <thead className="bg-slate-100 text-slate-900">
                         <tr>
                           <th className="px-3 py-2 text-left">Order</th>
                           <th className="px-3 py-2 text-left">Title</th>
                         </tr>
                       </thead>
-                      <tbody className="bg-slate-900/40 text-slate-300">
+                      <tbody className="bg-white text-slate-700">
                         {t.map((task, idx) => (
                           <tr
                             key={`${task.task_id || task.id || idx}`}
-                            className="border-t border-slate-800"
+                            className="border-t border-slate-200"
                           >
                             <td className="px-3 py-2">{task.order ?? idx + 1}</td>
                             <td className="px-3 py-2">
@@ -1014,13 +1016,13 @@ await doPostFallback();
         </Section>
 
       <Section title="Run Log / Result">
-        {busy && <div className="mb-2 text-sm text-slate-300">Working… this can take a little while.</div>}
+        {busy && <div className="mb-2 text-sm text-slate-600">Working… this can take a little while.</div>}
         <div className="grid gap-3 md:grid-cols-2">
-          <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-3">
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
             <div className="mb-1 text-sm font-semibold">Log</div>
             <div className="max-h-64 overflow-auto text-sm">
               {log.length ? (
-                <ul className="space-y-1 text-slate-300">
+                <ul className="space-y-1 text-slate-800">
                   {log.map((l, i) => (
                     <li key={i} className="whitespace-pre-wrap">
                       {l}
@@ -1028,19 +1030,19 @@ await doPostFallback();
                   ))}
                 </ul>
               ) : (
-                <div className="text-slate-400">No log yet.</div>
+                <div className="text-slate-500">No log yet.</div>
               )}
             </div>
           </div>
-          <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-3">
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
             <div className="mb-1 text-sm font-semibold">Last Result</div>
             <div className="max-h-64 overflow-auto text-sm">
               {lastResult ? (
-                <pre className="whitespace-pre-wrap rounded border border-slate-800 bg-slate-800/60 p-2 text-slate-200">
+                <pre className="whitespace-pre-wrap rounded border border-slate-200 bg-white p-2 text-slate-900">
                   {JSON.stringify(lastResult, null, 2)}
                 </pre>
               ) : (
-                <div className="text-slate-400">No result yet.</div>
+                <div className="text-slate-500">No result yet.</div>
               )}
             </div>
           </div>

@@ -25,14 +25,14 @@ function CollapsibleSection({
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <section className="rounded-xl border border-slate-800 bg-slate-900/40">
+    <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-center justify-between px-4 py-3 text-left"
+        className="w-full flex items-center justify-between px-4 py-3 text-left border-b border-slate-200 bg-slate-50 hover:bg-slate-100"
       >
         <span className="font-semibold">{title}</span>
-        <span className="text-slate-400 text-xl leading-none">{open ? "−" : "+"}</span>
+        <span className="text-slate-500 text-xl leading-none">{open ? "−" : "+"}</span>
       </button>
       {open && <div className="px-4 pb-4">{children}</div>}
     </section>
@@ -243,7 +243,7 @@ export default function PlanManageRun() {
           </Badge>
         )}
         <LoadingButton
-          className="bg-emerald-600 hover:bg-emerald-500"
+          className="bg-emerald-600 text-white hover:bg-emerald-500 shadow-sm"
           loading={vsBusy}
           disabled={!runId}
           onClick={onGenerateVS}
@@ -251,7 +251,7 @@ export default function PlanManageRun() {
           Generate
         </LoadingButton>
         <LoadingButton
-          className="bg-slate-700 hover:bg-slate-600"
+          className="border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 hover:border-slate-400"
           loading={vsBusy}
           disabled={!runId}
           onClick={onReloadVS}
@@ -259,7 +259,7 @@ export default function PlanManageRun() {
           Reload
         </LoadingButton>
         <LoadingButton
-          className="bg-indigo-600 hover:bg-indigo-500"
+          className="bg-indigo-600 text-white hover:bg-indigo-500 shadow-sm"
           loading={vsBusy}
           disabled={!runId || !vs}
           onClick={onSaveVS}
@@ -269,21 +269,25 @@ export default function PlanManageRun() {
         {busy && <span className="text-sm opacity-60">Loading…</span>}
         {vsMsg && <span className="text-sm opacity-80">{vsMsg}</span>}
         <button
-          className={`px-3 py-2 rounded-md ${isApproved ? "bg-slate-700 hover:bg-slate-600" : "bg-emerald-700 hover:bg-emerald-600"}`}
+          className={`inline-flex items-center px-3 py-2 rounded-md text-sm font-medium focus:outline-none focus:ring-2 focus:ring-offset-1 ${
+            isApproved
+              ? "border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+              : "border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+          }`}
           disabled={!runId}
           onClick={onToggleApprove}
         >
           {isApproved ? "Mark Draft" : "Approve"}
         </button>
 
-        {isApproved && (
-           <button
-             className="px-3 py-2 rounded-md bg-fuchsia-600 hover:bg-fuchsia-500"
-             disabled={!runId}
-             onClick={onCommitMemory}
-           >
-             Commit to Memory
-           </button>
+          {isApproved && (
+            <button
+              className="inline-flex items-center px-3 py-2 rounded-md bg-fuchsia-600 text-white text-sm font-medium shadow-sm hover:bg-fuchsia-500 focus:outline-none focus:ring-2 focus:ring-fuchsia-400 focus:ring-offset-1 disabled:opacity-50"
+              disabled={!runId}
+              onClick={onCommitMemory}
+            >
+              Commit to Memory
+            </button>
          )}
       </div>
 
@@ -298,9 +302,9 @@ export default function PlanManageRun() {
                   {detail.requirement.title}
                 </div>
                 <div className="opacity-70">Description:</div>
-                <pre className="whitespace-pre-wrap bg-slate-800 rounded p-2 border border-slate-700">
-                  {detail.requirement.description}
-                </pre>
+                  <pre className="whitespace-pre-wrap bg-slate-50 rounded-md p-3 border border-slate-200 text-slate-900">
+                    {detail.requirement.description}
+                  </pre>
               </div>
             ) : (
               <div className="text-sm opacity-60">No requirement persisted.</div>
@@ -309,7 +313,7 @@ export default function PlanManageRun() {
 
           {/* 2) Product Vision */}
           <CollapsibleSection title="Product Vision" defaultOpen>
-            <div className="border border-slate-800 rounded-lg p-3">
+            <div className="border border-slate-200 bg-slate-50 rounded-lg p-3">
               <ChipInput label="Goals" value={goals} onChange={setGoals} />
               <div className="h-3" />
               <ChipInput label="Personas" value={personas} onChange={setPersonas} />
@@ -320,7 +324,7 @@ export default function PlanManageRun() {
 
           {/* 3) Technical Solution */}
           <CollapsibleSection title="Technical Solution" defaultOpen>
-            <div className="border border-slate-800 rounded-lg p-3">
+            <div className="border border-slate-200 bg-slate-50 rounded-lg p-3">
               <ChipInput label="Stack" value={stack} onChange={setStack} />
               <div className="h-3" />
               <ChipInput label="Modules" value={modules} onChange={setModules} />

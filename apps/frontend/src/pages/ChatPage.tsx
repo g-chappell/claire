@@ -69,9 +69,9 @@ export default function ChatPage() {
 
   return (
     <main className="flex h-full w-full items-start justify-center">
-      <div className="mx-auto w-[1024px] h-full flex flex-col overflow-hidden rounded-2xl shadow-xl bg-slate-800 border border-slate-700">
+      <div className="mx-auto w-[1024px] h-full flex flex-col overflow-hidden rounded-2xl shadow-xl bg-white border border-slate-200">
         {/* History */}
-        <section className="flex-1 min-h-0 overflow-y-auto space-y-6 p-6">
+        <section className="flex-1 min-h-0 overflow-y-auto space-y-6 p-6 bg-slate-50">
           {messages.map((m: ChatMessage, i: number) => {
             const text =
               // be tolerant to any legacy shapes
@@ -94,7 +94,9 @@ export default function ChatPage() {
 
                 <div
                   className={`max-w-[75%] rounded-2xl px-4 py-3 relative ${
-                    m.role === "user" ? "bg-indigo-600" : "bg-slate-700"
+                    m.role === "user"
+                      ? "bg-indigo-100 text-slate-900"
+                      : "bg-slate-100 text-slate-900"
                   }`}
                 >
                   <div
@@ -126,13 +128,13 @@ export default function ChatPage() {
         </section>
 
         {/* Composer */}
-        <form onSubmit={onSend} className="border-t border-slate-700 bg-slate-800 p-4">
+        <form onSubmit={onSend} className="border-t border-slate-200 bg-slate-50 p-4">
           <textarea
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={onKeyDown}
             placeholder="How can I help you today?"
-            className="w-full h-24 resize-none rounded-xl bg-slate-700 p-4 text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            className="w-full h-24 resize-none rounded-xl border border-slate-200 bg-white p-4 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
             disabled={loading}
           />
         </form>
