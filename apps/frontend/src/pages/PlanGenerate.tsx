@@ -17,13 +17,13 @@ function Modal({
 }) {
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
-      <div className="relative z-10 w-[min(680px,95vw)] rounded-xl border border-slate-700 bg-slate-900 p-4 shadow-xl">
+      <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+        <div className="relative z-10 w-[min(680px,95vw)] rounded-xl border border-slate-200 bg-white p-4 shadow-xl">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-lg font-semibold">{title}</h2>
           <button
-            className="px-2 py-1 rounded bg-slate-700 hover:bg-slate-600"
+            className="px-2 py-1 rounded-md border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-slate-300 focus:ring-offset-1"
             onClick={onClose}
           >
             Close
@@ -136,7 +136,7 @@ export default function PlanGenerate() {
     <div className="flex items-center gap-3">
       <RunPicker value={runId} onChange={setRunId} />
       <button
-        className="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50"
+        className="inline-flex items-center px-4 py-2 rounded-md bg-emerald-600 text-white font-medium shadow-sm hover:bg-emerald-500 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1"
         disabled={!runId || busy}
         title="Create or Re-generate epics/stories/tasks for a Run"
         onClick={runPlan}
@@ -144,7 +144,7 @@ export default function PlanGenerate() {
         Generate / Re-Plan
       </button>
       <button
-        className="px-4 py-2 rounded bg-amber-600 hover:bg-amber-500 disabled:opacity-50"
+        className="inline-flex items-center px-4 py-2 rounded-md border border-amber-300 bg-amber-50 text-amber-800 font-medium hover:bg-amber-100 hover:border-amber-400 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-amber-400 focus:ring-offset-1"
         disabled={!runId || busy || resetBusy}
         onClick={resetPlan}
         title="Clears epics/stories/tasks/design notes; keeps Product Vision & Technical Solution"
@@ -154,7 +154,7 @@ export default function PlanGenerate() {
     </div>
 
       {run && (
-        <div className="rounded-xl border border-slate-700 bg-slate-900 p-4 text-sm">
+        <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm shadow-sm">
           <div className="opacity-70 mb-1">Selected run</div>
           <div className="grid md:grid-cols-3 gap-2">
             <div><span className="opacity-60">ID: </span><span className="font-mono">{run.id}</span></div>
@@ -187,16 +187,16 @@ export default function PlanGenerate() {
             <div className="opacity-80 mb-2">
               The following artefacts were deleted for this run:
             </div>
-            <table className="w-full text-sm border border-slate-800 rounded overflow-hidden">
-              <thead className="bg-slate-950/50">
+            <table className="w-full text-sm border border-slate-200 rounded-md overflow-hidden">
+              <thead className="bg-slate-100">
                 <tr>
-                  <th className="text-left p-2 border-b border-slate-800">Table</th>
-                  <th className="text-right p-2 border-b border-slate-800">Deleted</th>
+                  <th className="text-left p-2 border-b border-slate-200">Table</th>
+                  <th className="text-right p-2 border-b border-slate-200">Deleted</th>
                 </tr>
               </thead>
               <tbody>
                 {Object.entries(resetCounts).map(([k, v]) => (
-                  <tr key={k} className="odd:bg-slate-950/30">
+                  <tr key={k} className="odd:bg-slate-50">
                     <td className="p-2">{k}</td>
                     <td className="p-2 text-right tabular-nums">{v}</td>
                   </tr>

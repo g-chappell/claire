@@ -197,7 +197,7 @@ export default function RetrospectivePage() {
       {/* Header + totals */}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Retrospective & Feedback</h1>
-        <div className="text-sm text-slate-300 space-x-3">
+        <div className="text-sm text-slate-600 space-x-3">
           <span>Epics: {counts.totals.epics}</span>
           <span>Stories: {counts.totals.stories}</span>
           <span>Tasks: {counts.totals.tasks}</span>
@@ -205,14 +205,14 @@ export default function RetrospectivePage() {
       </div>
 
       {/* Filters */}
-      <section className="rounded-xl border border-slate-700 bg-slate-900 p-4">
+      <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <h2 className="mb-3 text-lg font-semibold">Filters</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           {/* Run */}
           <div>
-            <div className="mb-1 text-sm text-slate-300">Run</div>
+            <div className="mb-1 text-sm text-slate-700">Run</div>
             <select
-              className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-1.5 text-slate-100"
+              className="w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
               value={runId}
               onChange={e => {
                 setRunId(e.target.value);
@@ -224,11 +224,11 @@ export default function RetrospectivePage() {
 
           {/* Epic filter */}
           <div>
-            <div className="mb-1 text-sm text-slate-300">
+            <div className="mb-1 text-sm text-slate-700">
               Epic filter <span className="text-xs text-slate-400">(scopes stories & tasks)</span>
             </div>
             <select
-              className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-1.5 text-slate-100"
+              className="w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
               value={selectedEpicId}
               onChange={e => {
                 setSelectedEpicId(e.target.value);
@@ -241,18 +241,18 @@ export default function RetrospectivePage() {
                 <option key={e.id} value={e.id}>{e.title}</option>
               ))}
             </select>
-            <div className="mt-1 text-xs text-slate-400">
+            <div className="mt-1 text-xs text-slate-500">
               Filtered — Epics: {counts.filtered.epics} • Stories: {counts.filtered.stories} • Tasks: {counts.filtered.tasks}
             </div>
           </div>
 
           {/* Story filter */}
           <div>
-            <div className="mb-1 text-sm text-slate-300">
+            <div className="mb-1 text-sm text-slate-700">
               Story filter <span className="text-xs text-slate-400">(scopes tasks; narrowed by epic if set)</span>
             </div>
             <select
-              className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-1.5 text-slate-100"
+              className="w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
               value={selectedStoryIdFilter}
               onChange={e => {
                 setSelectedStoryIdFilter(e.target.value);
@@ -269,14 +269,14 @@ export default function RetrospectivePage() {
       </section>
 
       {/* Selection box (Type + Artefact) */}
-      <section className="rounded-xl border border-slate-700 bg-slate-900 p-4">
+      <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <h2 className="mb-3 text-lg font-semibold">Select artefact</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           {/* Artefact type */}
           <div>
-            <div className="mb-1 text-sm text-slate-300">Artefact type</div>
+            <div className="mb-1 text-sm text-slate-700">Artefact type</div>
             <select
-              className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-1.5 text-slate-100"
+              className="w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
               value={kind}
               onChange={e => {
                 setKind(e.target.value as Kind);
@@ -291,25 +291,25 @@ export default function RetrospectivePage() {
 
           {/* Artefact selector (fully respects filters) */}
           <div className="md:col-span-2">
-            <div className="mb-1 text-sm text-slate-300">Artefact</div>
+            <div className="mb-1 text-sm text-slate-700">Artefact</div>
             <select
-              className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-1.5 text-slate-100"
+              className="w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
               value={selectedId}
               onChange={e => setSelectedId(e.target.value)}
             >
               <option value="">—</option>
               {candidates.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
             </select>
-            <div className="mt-1 text-xs text-slate-400">
+            <div className="mt-1 text-xs text-slate-500">
               Showing {candidates.length} {kind}{candidates.length === 1 ? "" : "s"} (filters applied)
             </div>
 
             {/* Selected context panel */}
             {selectedId && (
-              <div className="w-full mt-3 rounded-xl border border-slate-700 bg-slate-900/60 p-3">
-                <div className="mb-1 text-sm text-slate-300">Selected {kind} context</div>
-                <div className="text-slate-100 font-semibold">{selectedLabel || "(untitled)"}</div>
-                <p className="mt-2 whitespace-pre-wrap text-sm text-slate-300">
+              <div className="w-full mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <div className="mb-1 text-sm text-slate-700">Selected {kind} context</div>
+                <div className="text-slate-900 font-semibold">{selectedLabel || "(untitled)"}</div>
+                <p className="mt-2 whitespace-pre-wrap text-sm text-slate-700">
                   {selectedDescription || "No description provided for this artefact."}
                 </p>
               </div>
@@ -319,12 +319,12 @@ export default function RetrospectivePage() {
       </section>
 
       {/* Feedback editors */}
-      <section className="rounded-xl border border-slate-700 bg-slate-900 p-4">
+      <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="grid gap-4 md:grid-cols-2">
           <div>
             <div className="mb-1 text-sm font-semibold">Human feedback</div>
             <textarea
-              className="h-48 w-full rounded-xl border border-slate-700 bg-slate-800 p-2 text-slate-100"
+              className="h-48 w-full rounded-md border border-slate-300 bg-white p-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
               value={human}
               onChange={e => setHuman(e.target.value)}
               placeholder="Add actionable critique, constraints, risks, priorities…"
@@ -333,14 +333,14 @@ export default function RetrospectivePage() {
               <button
                 onClick={saveHuman}
                 disabled={!runId || !selectedId || busy}
-                className="rounded-xl bg-slate-800 px-3 py-1.5 text-slate-100 hover:bg-slate-700 disabled:opacity-50"
+                className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-indigo-500 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1"
               >
                 Save human feedback
               </button>
               <button
                 onClick={genAI}
                 disabled={!runId || !selectedId || busy}
-                className="rounded-xl border border-slate-700 bg-slate-900 px-3 py-1.5 text-slate-100 hover:bg-slate-800 disabled:opacity-50"
+                className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 hover:border-slate-400 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-slate-300 focus:ring-offset-1"
               >
                 Generate AI feedback
               </button>
@@ -349,7 +349,7 @@ export default function RetrospectivePage() {
           <div>
             <div className="mb-1 text-sm font-semibold">AI feedback</div>
             <textarea
-              className="h-48 w-full rounded-xl border border-slate-700 bg-slate-800 p-2 text-slate-100"
+              className="h-48 w-full rounded-md border border-slate-300 bg-white p-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
               value={ai}
               onChange={e => setAI(e.target.value)}
               placeholder="AI synthesis will appear here…"
@@ -358,14 +358,14 @@ export default function RetrospectivePage() {
               <button
                 onClick={() => patchFeedback(runId, kind, selectedId, { ai })}
                 disabled={!runId || !selectedId || busy}
-                className="rounded-xl bg-slate-800 px-3 py-1.5 text-slate-100 hover:bg-slate-700 disabled:opacity-50"
+                className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-indigo-500 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1"
               >
                 Save AI feedback
               </button>
             </div>
           </div>
         </div>
-        {msg && <div className="mt-3 text-sm text-slate-300">{msg}</div>}
+        {msg && <div className="mt-3 text-sm text-slate-600">{msg}</div>}
       </section>
     </div>
   );

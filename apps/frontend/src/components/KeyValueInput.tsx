@@ -32,7 +32,7 @@ export default function KeyValueInput({
     <div>
       <label className="block text-sm mb-1 opacity-80">{label}</label>
       <input
-        className="w-full rounded bg-slate-800 border border-slate-700 px-3 py-2"
+         className="w-full rounded-md bg-white border border-slate-300 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
         placeholder={placeholder ?? "api:REST, db:SQLite"}
         value={toText(value)}
         onChange={(e) => onChange(fromText(e.target.value))}
