@@ -35,7 +35,28 @@ def create_run(payload: RunCreate, db: Session = Depends(get_db)):
 
     run = RunORM(id=run_id, status="DRAFT", title=(payload_title or "")[:200])  # <-- set title
 
+    run = RunORM(id=run_id, status="DRAFT", title=(payload_title or "")[:200])
     db.add(run)
+
+    # ---- Resolve experiment knobs: payload value → settings default ----
+    exp_label = (
+        payload.experiment_label
+        if getattr(payload, "experiment_label", None)
+        else getattr(settings, "EXPERIMENT_LABEL", None)
+    )
+
+    mode = (
+        payload.prompt_context_mode
+        if getattr(payload, "prompt_context_mode", None)
+        else getattr(settings, "PROMPT_CONTEXT_MODE", "structured")
+    ) or "structured"
+
+    # use_rag can legitimately be False, so we need a None check
+    payload_use_rag = getattr(payload, "use_rag", None)
+    if payload_use_rag is None:
+        rag_flag = getattr(settings, "USE_RAG", True)
+    else:
+        rag_flag = bool(payload_use_rag)
 
     manifest = RunManifestORM(
         run_id=run_id,
@@ -44,6 +65,10 @@ def create_run(payload: RunCreate, db: Session = Depends(get_db)):
             "provider": settings.LLM_PROVIDER,
             "temperature": settings.TEMPERATURE,
             "context_snapshot_id": str(uuid.uuid4()),
+            # --- experiment snapshot at creation time ---
+            "experiment_label": exp_label,
+            "prompt_context_mode": mode,
+            "use_rag": rag_flag,
         },
     )
     db.add(manifest)
@@ -65,18 +90,30 @@ def create_run(payload: RunCreate, db: Session = Depends(get_db)):
     mf: Optional[RunManifestORM] = (
         db.query(RunManifestORM).filter_by(run_id=run_id).first()
     )
-    ctx_id = ""
+    manifest_data: dict = {}
     if mf and getattr(mf, "data", None):
-        ctx_id = cast(dict, mf.data).get("context_snapshot_id", "")
+        manifest_data = cast(dict, mf.data)
 
     return {
         "run_id": run_id,
         "manifest": RunManifest(
             run_id=run_id,
-            model=settings.LLM_MODEL,
-            provider=settings.LLM_PROVIDER,
-            temperature=settings.TEMPERATURE,
-            context_snapshot_id=ctx_id,
+            model=manifest_data.get("model", settings.LLM_MODEL),
+            provider=manifest_data.get("provider", settings.LLM_PROVIDER),
+            temperature=manifest_data.get("temperature", settings.TEMPERATURE),
+            context_snapshot_id=manifest_data.get("context_snapshot_id", ""),
+            experiment_label=manifest_data.get(
+                "experiment_label",
+                getattr(settings, "EXPERIMENT_LABEL", None),
+            ),
+            prompt_context_mode=manifest_data.get(
+                "prompt_context_mode",
+                getattr(settings, "PROMPT_CONTEXT_MODE", "structured"),
+            ),
+            use_rag=manifest_data.get(
+                "use_rag",
+                getattr(settings, "USE_RAG", True),
+            ),
         ),
         "requirement_id": req.id,
         "status": cast(str, run.status),

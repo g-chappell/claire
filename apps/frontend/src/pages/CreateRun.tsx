@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { createRun, listRuns } from "../lib/api";
 import type { RunCreate, RunSummary } from "../types";
 import { Link } from "react-router-dom";
+import { loadExperimentSettings } from "../lib/experimentSettings";
 
 function Modal({
   open,
@@ -55,14 +56,26 @@ export default function CreateRun() {
   useEffect(() => { refresh().catch(console.error); }, []);
 
   async function onCreate() {
-    const payload: RunCreate = {
+    const exp = loadExperimentSettings();
+
+    const payload: RunCreate & {
+      // extra experiment knobs understood by the backend RunCreate model
+      experiment_label: string;
+      prompt_context_mode: "structured" | "flat";
+      use_rag: boolean;
+    } = {
       title: title.trim() || "(untitled)",
       requirement_title: reqTitle.trim() || "As a user, I want …",
       requirement_description: reqDesc.trim() || "Describe the requirement…",
       constraints: [],
       priority: "Should",
       non_functionals: [],
+      // snapshot of current experiment settings
+      experiment_label: exp.experimentLabel,
+      prompt_context_mode: exp.promptContextMode,
+      use_rag: exp.useRag,
     };
+
     setBusy(true);
     try {
       await createRun(payload);

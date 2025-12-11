@@ -102,10 +102,30 @@ def post_vision_solution(run_id: str,request: Request, use_rag: bool | None = Qu
     try:
         # --- Optional RAG context (feature-flagged) ---
         rag_context = ""
-        enabled = use_rag if use_rag is not None else settings.USE_RAG
+
+        # Prefer per-run manifest snapshot; fall back to env default.
+        mf = db.query(RunManifestORM).filter_by(run_id=run_id).first()
+        mf_data = dict(mf.data or {}) if mf and getattr(mf, "data", None) else {}
+        manifest_use_rag = mf_data.get("use_rag")
+
+        if use_rag is not None:
+            # explicit query override wins
+            enabled = use_rag
+        elif manifest_use_rag is not None:
+            enabled = bool(manifest_use_rag)
+        else:
+            enabled = settings.USE_RAG
+
         store_cls = type(request.app.state.memory).__name__
-        logger.info("RAG: enabled=%s (env=%s param=%s) store=%s",
-                    enabled, settings.USE_RAG, use_rag, store_cls)
+        logger.info(
+            "RAG: enabled=%s (env=%s manifest=%s param=%s) store=%s",
+            enabled,
+            settings.USE_RAG,
+            manifest_use_rag,
+            use_rag,
+            store_cls,
+        )
+
         if enabled:
             # Grab the run's requirement to form the retrieval query
             req = db.query(RequirementORM).filter_by(run_id=run_id).first()

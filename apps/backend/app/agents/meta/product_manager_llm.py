@@ -329,26 +329,48 @@ class ProductManagerLLM:
         requirement: Dict[str, str],
         vision: ProductVision,
         solution: TechnicalSolution,
-        db: Session, run_id: str,
+        db: Session,
+        run_id: str,
+        prompt_context_mode: str = "structured",
         config: Optional[RunnableConfig] = None,
     ) -> PlanBundle:
         """
         Given an approved ProductVision + TechnicalSolution, produce the rest of the bundle.
         """
 
+        # Global feedback context for this run (used by most sub-chains)
         fctx_global = build_feedback_context_for_run(db, run_id=run_id)
 
         # Requirements Analyst → Epics + Stories
+        # Experiment knob (per-run): prompt_context_mode
+        # - "structured": full context (default Trial-3 style)
+        # - "flat":       features-only (context-engineering ablation)
+        mode = (prompt_context_mode or "structured").strip().lower()
+
+        if mode == "flat":
+            ra_inputs = {
+                "features": ", ".join(vision.features),
+                # strip architecture + decisions + feedback context for ablation
+                "modules": "",
+                "interfaces": "",
+                "decisions": "",
+                "feedback_context": "",
+            }
+        else:
+            ra_inputs = {
+                "features": ", ".join(vision.features),
+                "modules": ", ".join(solution.modules),
+                "interfaces": ", ".join(
+                    f"{k}:{v}" for k, v in (solution.interfaces or {}).items()
+                ),
+                "decisions": ", ".join(solution.decisions or []),
+                "feedback_context": fctx_global,
+            }
+
         ra_draft: RAPlanDraft = _invoke_typed(
             RAPlanDraft,
             self.ra_chain,
-            {
-                "features": ", ".join(vision.features),
-                "modules": ", ".join(solution.modules),
-                "interfaces": ", ".join(f"{k}:{v}" for k, v in (solution.interfaces or {}).items()),
-                "decisions": ", ".join(solution.decisions or []),
-                "feedback_context": fctx_global,
-            },
+            ra_inputs,
             config=config,
         )
 
@@ -624,14 +646,25 @@ class ProductManagerLLM:
         requirement: Dict[str, str],
         db: Session,
         run_id: str,
+        prompt_context_mode: str = "structured",
         config: Optional[RunnableConfig] = None,
     ) -> PlanBundle:
         """
-        Single call that does both stages with DB-backed feedback.
+        Convenience: run Stage A (PV/TS) then Stage B (epics/stories/etc)
+        in one shot, using a per-run prompt_context_mode.
         """
         vision, solution = self.plan_vision_solution(
-            requirement, db=db, run_id=run_id, config=config
+            requirement,
+            db=db,
+            run_id=run_id,
+            config=config,
         )
         return self.plan_remaining(
-            requirement, vision, solution, db=db, run_id=run_id, config=config
+            requirement,
+            vision,
+            solution,
+            db=db,
+            run_id=run_id,
+            prompt_context_mode=prompt_context_mode,
+            config=config,
         )

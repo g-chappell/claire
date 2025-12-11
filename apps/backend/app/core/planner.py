@@ -5,14 +5,32 @@ from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import Session
 
 from app.core.models import (
-    PlanBundle, ProductVision, TechnicalSolution, Epic, Story,
-    AcceptanceCriteria, Requirement, Task, DesignNote
+    PlanBundle,
+    ProductVision,
+    TechnicalSolution,
+    Epic,
+    Story,
+    AcceptanceCriteria,
+    Requirement,
+    Task,
+    DesignNote,
+    RunManifest,
 )
 
 from app.storage.models import (
-    RequirementORM, ProductVisionORM, TechnicalSolutionORM,
-    EpicORM, StoryORM, AcceptanceORM, TaskORM, DesignNoteORM
+    RequirementORM,
+    ProductVisionORM,
+    TechnicalSolutionORM,
+    EpicORM,
+    StoryORM,
+    AcceptanceORM,
+    TaskORM,
+    DesignNoteORM,
+    RunManifestORM,
 )
+
+from app.configs.settings import get_settings
+
 from app.agents.meta.product_manager_llm import ProductManagerLLM
 
 import logging
@@ -39,6 +57,29 @@ def _coerce_task_status(v) -> TaskStatus:
 pm = ProductManagerLLM()
 
 # --- helpers ---------------------------------------------------------------
+
+def _get_run_config(db: Session, run_id: str) -> RunManifest:
+    """
+    Resolve per-run config snapshot (manifest) with env defaults as fallback.
+    This is what the planner should use so experiments are repeatable.
+    """
+    settings = get_settings()
+
+    mf: RunManifestORM | None = (
+        db.query(RunManifestORM).filter_by(run_id=run_id).first()
+    )
+    data: dict[str, Any] = dict(mf.data or {}) if mf and getattr(mf, "data", None) else {}
+
+    return RunManifest(
+        run_id=run_id,
+        model=data.get("model", settings.LLM_MODEL),
+        provider=data.get("provider", settings.LLM_PROVIDER),
+        temperature=data.get("temperature", settings.TEMPERATURE),
+        context_snapshot_id=data.get("context_snapshot_id", ""),
+        experiment_label=data.get("experiment_label", settings.EXPERIMENT_LABEL),
+        prompt_context_mode=data.get("prompt_context_mode", settings.PROMPT_CONTEXT_MODE),
+        use_rag=data.get("use_rag", settings.USE_RAG),
+    )
 
 def _columns(model) -> set[str]:
     """Return the set of column names for an ORM model (works with Alembic/autogen too)."""
@@ -290,17 +331,15 @@ def finalise_plan(db: Session, run_id: str,
         non_functionals=req.non_functionals or [],
     )
 
-    # Generate remaining artefacts and persist full bundle
-    bundle = pm.plan_remaining(p_req.model_dump(), pv, ts, db=db, run_id=run_id)
-    # bundle = _apply_dependency_ordering(bundle)
-    # try:
-    #     if any(getattr(e, "priority_rank", None) in (None, 0) for e in bundle.epics):
-    #         logger.debug("plan_run: filled missing epic ranks after LLM output")
-    #     if any(getattr(s, "priority_rank", None) in (None, 0) for s in bundle.stories):
-    #         logger.debug("plan_run: filled missing story ranks after LLM output")
-    # except Exception:
-    #     pass
-    #_validate_llm_order(bundle)
+    cfg = _get_run_config(db, run_id)
+    bundle = pm.plan_remaining(
+        p_req.model_dump(),
+        pv,
+        ts,
+        db=db,
+        run_id=run_id,
+        prompt_context_mode=cfg.prompt_context_mode,
+    )
     _persist_plan(db, run_id, req, bundle)
     return bundle
 
@@ -465,12 +504,21 @@ def plan_run(db: Session, run_id: str) -> PlanBundle:
         raise ValueError("requirement not found for run")
 
     p_req = Requirement(
-        id=req.id, title=req.title, description=req.description,
-        constraints=req.constraints or [], priority=_coerce_priority(getattr(req, "priority", None)),
+        id=req.id,
+        title=req.title,
+        description=req.description,
+        constraints=req.constraints or [],
+        priority=_coerce_priority(getattr(req, "priority", None)),
         non_functionals=req.non_functionals or [],
     )
 
-    bundle = pm.plan(p_req.model_dump(), db=db, run_id=run_id)
+    cfg = _get_run_config(db, run_id)
+    bundle = pm.plan(
+        p_req.model_dump(),
+        db=db,
+        run_id=run_id,
+        prompt_context_mode=cfg.prompt_context_mode,
+    )
     # bundle = _apply_dependency_ordering(bundle)
     # try:
     #     if any(getattr(e, "priority_rank", None) in (None, 0) for e in bundle.epics):
