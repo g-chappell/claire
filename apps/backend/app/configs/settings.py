@@ -19,10 +19,20 @@ class _Common:
     FRONTEND_ORIGIN: Optional[str] = None
 
     # LLM (informational)
-    LLM_PROVIDER: Optional[str] = None
+    LLM_PROVIDER: Optional[str] = None     # e.g. "anthropic" | "openai"
     LLM_MODEL: str = "claude-sonnet-4-5-20250929"
     TEMPERATURE: float = 0.2
-    LLM_CALL_DELAY_SECONDS: float = 5.0  # default spacing; set to 0 to disable
+    LLM_CALL_DELAY_SECONDS: float = 5.0    # default spacing; set to 0 to disable
+
+    # Experiments / trials
+    # Human-readable label you use in analysis to group runs
+    # e.g. "trial1.baseline", "trial2.memory", "trial3.best", "ablation.rag_off"
+    EXPERIMENT_LABEL: str = "trial1.baseline"
+
+    # Prompt context mode for RA chain:
+    # "structured" = full context (features + modules + interfaces + decisions + feedback)
+    # "flat"       = features-only ablation (no architecture/feedback context)
+    PROMPT_CONTEXT_MODE: str = "structured"   # "structured" | "flat"
 
     # Feature flags (planning output)
     FEATURE_QA: bool = False             # if False, skip generating acceptance/tests

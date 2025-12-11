@@ -50,16 +50,25 @@ def ingest(req: IngestRequest, request: Request, settings = Depends(get_settings
         else:
             title = a.title or req_title or ""
 
-        docs.append(MemoryDoc(
-        id=f"{req.run_id}:{a.type}:{uuid.uuid4().hex[:8]}",
-        text=a.text,
-        meta={
-            "run_id": req.run_id,
-            "type": a.type,
-            "title": title,          # human-friendly title
-            "req_title": req_title,  # <- requirement title for logging & RAG labels
-            },
-        ))
+        # Build meta as Dict[str, str] to satisfy MemoryDoc.meta
+        meta: dict[str, str] = {
+            "run_id": str(req.run_id),
+            "type": str(a.type),
+            "title": str(title),
+            "req_title": str(req_title),
+        }
+        # Optionally tag experiment label, but keep it as a string
+        exp_label = getattr(settings, "EXPERIMENT_LABEL", None)
+        if exp_label:
+            meta["experiment_label"] = str(exp_label)
+
+        docs.append(
+            MemoryDoc(
+                id=f"{req.run_id}:{a.type}:{uuid.uuid4().hex[:8]}",
+                text=a.text,
+                meta=meta,
+            )
+        )
 
     store = request.app.state.memory
     store.add(docs)
@@ -82,6 +91,9 @@ def rag_status(request: Request, settings = Depends(get_settings)):
         "top_k": settings.RAG_TOP_K,
         "use_rag": settings.USE_RAG,
         "store": type(store).__name__,
+        # NEW: experiment-related knobs (for UI + sanity checks)
+        "experiment_label": getattr(settings, "EXPERIMENT_LABEL", None),
+        "prompt_context_mode": getattr(settings, "PROMPT_CONTEXT_MODE", "structured"),
     }
 
 @router.get("/search")

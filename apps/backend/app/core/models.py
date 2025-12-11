@@ -93,12 +93,25 @@ class PlanBundle(BaseModel):
 
 # ====== Run / Manifest ======
 class RunCreate(BaseModel):
-    run_title: Optional[str] = Field(default=None, max_length=200, description="Short description for the run")
+    run_title: Optional[str] = Field(
+        default=None,
+        max_length=200,
+        description="Short description for the run",
+    )
     requirement_title: str
     requirement_description: str
     constraints: list[str] = Field(default_factory=list)
     priority: Literal["Must", "Should", "Could"] = "Should"
     non_functionals: list[str] = Field(default_factory=list)
+
+    # --- Experiment knobs (optional on input) ---
+    experiment_label: Optional[str] = Field(
+        default=None,
+        description="Human-readable trial/ablation label; falls back to settings.EXPERIMENT_LABEL",
+    )
+    prompt_context_mode: Literal["structured", "flat"] = "structured"
+    # None means: use settings.USE_RAG as the default
+    use_rag: Optional[bool] = None
 
 
 class RunManifest(BaseModel):
@@ -107,3 +120,17 @@ class RunManifest(BaseModel):
     provider: str | None
     temperature: float
     context_snapshot_id: str
+
+    # --- Experiment snapshot for this run ---
+    # e.g. "trial1.baseline", "trial3.best", "ablation.rag_off"
+    experiment_label: Optional[str] = Field(
+        default=None,
+        description="Human-readable experiment/trial label."
+    )
+
+    # Prompt context mode used for the RA chain
+    # "structured" = full context, "flat" = ablated features-only context
+    prompt_context_mode: Literal["structured", "flat"] = "structured"
+
+    # Whether RAG retrieval was enabled for this run
+    use_rag: bool = True

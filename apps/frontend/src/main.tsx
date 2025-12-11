@@ -12,6 +12,7 @@ import PlanGenerate from "./pages/PlanGenerate";
 import PlanView from "./pages/PlanView";
 import ImplementCodePage from "./pages/ImplementCode";
 import RetrospectivePage from "./pages/Retrospective";
+import SettingsPage from "./pages/SettingsPage";
 
 const router = createBrowserRouter([
   {
@@ -26,7 +27,7 @@ const router = createBrowserRouter([
       { path: "plan/view", element: <PlanView /> },
       { path: "implement", element: <ImplementCodePage /> },
       { path: "retrospective", element: <RetrospectivePage /> },
-      { path: "settings", element: <div className="p-6 opacity-60">Review (coming soon)</div> },
+      { path: "settings", element: <SettingsPage /> },
     ],
   },
 ]);
