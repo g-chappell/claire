@@ -47,6 +47,7 @@ from app.core.models import (
 
 import random
 import time
+import logging
 
 try:
     from anthropic._exceptions import (
@@ -63,6 +64,7 @@ PROVIDER_TRANSIENT_STATUSES = {429, 500, 502, 503, 504, 529}
 
 from app.configs.settings import get_settings
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 
 
@@ -253,9 +255,18 @@ class ProductManagerLLM:
 
     def __init__(self, model: Optional[str] = None):
         llm = make_chat_model(model)
+        logger.info(
+            "PM_INIT provider=%s model=%s",
+            getattr(settings, "LLM_PROVIDER", "unknown"),
+            model or getattr(settings, "LLM_MODEL", "unknown"),
+        )
         self.vision_chain = VISION.make_chain(llm)
         self.arch_chain = ARCH.make_chain(llm)
+        # RA chains:
+        # - ra_chain          : full / best context engineering (structured + features_only)
+        # - ra_chain_minimal  : basic context engineering (minimal mode)
         self.ra_chain = RA.make_chain(llm)
+        self.ra_chain_minimal = RA.make_minimal_chain(llm)
         self.qa_chain = QA.make_chain(llm) if settings.FEATURE_QA else None
         self.tw_notes_chain = TW.make_notes_chain(llm) if settings.FEATURE_DESIGN_NOTES else None
         self.tw_tasks_chain = TW.make_tasks_chain(llm)
@@ -343,20 +354,28 @@ class ProductManagerLLM:
 
         # Requirements Analyst → Epics + Stories
         # Experiment knob (per-run): prompt_context_mode
-        # - "structured": full context (default Trial-3 style)
-        # - "flat":       features-only (context-engineering ablation)
+        # - "structured":    full TS context + best RA prompt
+        # - "features_only": features-only ablation (no TS/feedback context, best RA prompt)
+        # - "minimal":       features-only + basic RA prompt (weakest context engineering)
         mode = (prompt_context_mode or "structured").strip().lower()
-
+        # Back-compat: treat any legacy "flat" value as "features_only"
         if mode == "flat":
-            ra_inputs = {
-                "features": ", ".join(vision.features),
-                # strip architecture + decisions + feedback context for ablation
-                "modules": "",
-                "interfaces": "",
-                "decisions": "",
-                "feedback_context": "",
-            }
-        else:
+            mode = "features_only"
+        if mode not in {"structured", "features_only", "minimal"}:
+            mode = "structured"
+
+        logger.info(
+            "PM_RA_CONTEXT run=%s mode=%s features=%d modules=%d decisions=%d has_feedback=%s",
+            run_id,
+            mode,
+            len(vision.features or []),
+            len(solution.modules or []),
+            len(solution.decisions or []),
+            bool(fctx_global),
+        )
+
+        if mode == "structured":
+            # Full TS + feedback context (best context engineering)
             ra_inputs = {
                 "features": ", ".join(vision.features),
                 "modules": ", ".join(solution.modules),
@@ -366,12 +385,37 @@ class ProductManagerLLM:
                 "decisions": ", ".join(solution.decisions or []),
                 "feedback_context": fctx_global,
             }
+        else:
+            # features_only / minimal → ablate TS + feedback context
+            ra_inputs = {
+                "features": ", ".join(vision.features),
+                # strip architecture + decisions + feedback context for ablation
+                "modules": "",
+                "interfaces": "",
+                "decisions": "",
+                "feedback_context": "",
+            }
+
+        # Choose RA chain based on mode
+        if mode == "minimal":
+            ra_chain = self.ra_chain_minimal
+        else:
+            # structured + features_only both use the full/best RA prompt
+            ra_chain = self.ra_chain
 
         ra_draft: RAPlanDraft = _invoke_typed(
             RAPlanDraft,
-            self.ra_chain,
+            ra_chain,
             ra_inputs,
             config=config,
+        )
+
+        logger.info(
+            "PM_RA_OUTPUT run=%s mode=%s epics=%d stories=%d",
+            run_id,
+            mode,
+            len(ra_draft.epics or []),
+            len(ra_draft.stories or []),
         )
 
         # Map epics from RA plan — preserve LLM priority_ranks and dependencies

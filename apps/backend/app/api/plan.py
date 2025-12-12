@@ -94,7 +94,13 @@ def _set_gate_status(db: Session, run_id: str, status: str) -> None:
 # ---------- NEW: Stage 1 — generate/read/update PV/TS ----------
 
 @router.post("/runs/{run_id}/plan/vision-solution", response_model=VisionSolutionOut)
-def post_vision_solution(run_id: str,request: Request, use_rag: bool | None = Query(default=None), db: Session = Depends(get_db), settings = Depends(get_settings),):
+def post_vision_solution(
+    run_id: str,
+    request: Request,
+    use_rag: bool | None = Query(default=None),
+    db: Session = Depends(get_db),
+    settings = Depends(get_settings),
+):
     """
     Generate *only* the Product Vision & Technical Solution for this run,
     persist them, and return them. Does not create epics/stories yet.
@@ -103,55 +109,80 @@ def post_vision_solution(run_id: str,request: Request, use_rag: bool | None = Qu
         # --- Optional RAG context (feature-flagged) ---
         rag_context = ""
 
-        # Prefer per-run manifest snapshot; fall back to env default.
+        # Load manifest snapshot for this run, if present
         mf = db.query(RunManifestORM).filter_by(run_id=run_id).first()
         mf_data = dict(mf.data or {}) if mf and getattr(mf, "data", None) else {}
         manifest_use_rag = mf_data.get("use_rag")
+        exp_label = mf_data.get("experiment_label")
 
+        # Decide whether RAG is enabled and where that decision came from
         if use_rag is not None:
             # explicit query override wins
             enabled = use_rag
+            source = "query_param"
         elif manifest_use_rag is not None:
             enabled = bool(manifest_use_rag)
+            source = "manifest"
         else:
             enabled = settings.USE_RAG
+            source = "env"
 
         store_cls = type(request.app.state.memory).__name__
         logger.info(
-            "RAG: enabled=%s (env=%s manifest=%s param=%s) store=%s",
+            "RAG_GATE run=%s exp=%s enabled=%s source=%s env_use_rag=%s manifest_use_rag=%s param_use_rag=%s store=%s",
+            run_id,
+            exp_label,
             enabled,
+            source,
             settings.USE_RAG,
             manifest_use_rag,
             use_rag,
             store_cls,
         )
 
-        if enabled:
+        if not enabled:
+            # Explicitly record that we are *not* pulling any RAG context for this run.
+            logger.info(
+                "RAG_GATE run=%s exp=%s disabled; skipping retrieval",
+                run_id,
+                exp_label,
+            )
+        else:
             # Grab the run's requirement to form the retrieval query
             req = db.query(RequirementORM).filter_by(run_id=run_id).first()
             if req:
-                ctx_text, _hits = build_rag_context(
+                ctx_text, hits = build_rag_context(
                     request,
                     requirement_title=req.title,
                     requirement_description=req.description,
                     types=("product_vision", "technical_solution"),
                     top_k=settings.RAG_TOP_K,
                 )
-                logger.info("RAG: build_rag_context -> %d hits, ctx_len=%d",
-                len(_hits), len(ctx_text))
                 rag_context = ctx_text
+                logger.info(
+                    "RAG_CONTEXT run=%s exp=%s hits=%d ctx_len=%d",
+                    run_id,
+                    exp_label,
+                    len(hits),
+                    len(rag_context),
+                )
+
+        # Generate PV/TS, passing in any RAG context we built
         pv, ts = generate_vision_solution(db, run_id, rag_context=rag_context)
         # Mark gate as "draft" until user approves/finalises
         _set_gate_status(db, run_id, "draft")
         return {"product_vision": pv, "technical_solution": ts}
+
     except ValueError as e:
         msg = str(e)
         if "requirement not found" in msg.lower():
             raise HTTPException(status_code=404, detail=msg)
         raise HTTPException(status_code=400, detail=msg)
-    except Exception as e:
+    except Exception:
         logger.exception("vision-solution generation failed")
-        raise HTTPException(status_code=500, detail="failed to generate vision/solution")
+        raise HTTPException(
+            status_code=500, detail="failed to generate vision/solution"
+        )
 
 
 @router.get("/runs/{run_id}/plan/vision-solution", response_model=VisionSolutionOut)

@@ -1,6 +1,6 @@
 // lib/experimentSettings.ts
 
-export type PromptContextMode = "structured" | "flat";
+export type PromptContextMode = "structured" | "features_only" | "minimal";
 
 export type ExperimentSettings = {
   experimentLabel: string;
@@ -29,13 +29,29 @@ export function loadExperimentSettings(): ExperimentSettings {
   }
 
   try {
-    const parsed = JSON.parse(raw) as Partial<ExperimentSettings>;
+    const parsed = JSON.parse(raw) as Partial<ExperimentSettings> & {
+      // for back-compat, allow legacy "flat" string
+      promptContextMode?: string;
+    };
+
+    let mode: PromptContextMode = "structured";
+    const rawMode = parsed.promptContextMode as string | undefined;
+
+    if (rawMode === "flat") {
+      // legacy value → new semantics
+      mode = "features_only";
+    } else if (
+      rawMode === "structured" ||
+      rawMode === "features_only" ||
+      rawMode === "minimal"
+    ) {
+      mode = rawMode as PromptContextMode;
+    }
+
     return {
       experimentLabel: parsed.experimentLabel ?? "trial1.baseline",
-      promptContextMode:
-        parsed.promptContextMode === "flat" ? "flat" : "structured",
-      useRag:
-        typeof parsed.useRag === "boolean" ? parsed.useRag : true,
+      promptContextMode: mode,
+      useRag: typeof parsed.useRag === "boolean" ? parsed.useRag : true,
     };
   } catch {
     return {

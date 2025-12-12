@@ -2,6 +2,9 @@ from __future__ import annotations
 from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
+PromptContextMode = Literal["structured", "features_only", "minimal", "flat"]
+# "flat" kept for backwards-compat with older runs; treated as "features_only" in logic.
+
 
 # ====== Domain ======
 class Requirement(BaseModel):
@@ -109,7 +112,7 @@ class RunCreate(BaseModel):
         default=None,
         description="Human-readable trial/ablation label; falls back to settings.EXPERIMENT_LABEL",
     )
-    prompt_context_mode: Literal["structured", "flat"] = "structured"
+    prompt_context_mode: PromptContextMode = "structured"
     # None means: use settings.USE_RAG as the default
     use_rag: Optional[bool] = None
 
@@ -129,8 +132,11 @@ class RunManifest(BaseModel):
     )
 
     # Prompt context mode used for the RA chain
-    # "structured" = full context, "flat" = ablated features-only context
-    prompt_context_mode: Literal["structured", "flat"] = "structured"
+    # "structured"    = full context
+    # "features_only" = features-only, best RA prompt
+    # "minimal"       = features-only, minimal RA prompt
+    # "flat"          = legacy alias for "features_only"
+    prompt_context_mode: PromptContextMode = "structured"
 
     # Whether RAG retrieval was enabled for this run
     use_rag: bool = True

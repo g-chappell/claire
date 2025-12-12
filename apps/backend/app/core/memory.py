@@ -7,6 +7,9 @@ if TYPE_CHECKING:
     # Only for the type checker; no runtime import
     from chromadb.api.types import IDs, Documents, Embeddings, Metadatas, Metadata, Include
 
+import logging
+logger = logging.getLogger(__name__)
+
 @dataclass
 class MemoryDoc:
     id: str
@@ -71,12 +74,26 @@ class ChromaMemoryStore:
             return arr  # type: ignore[return-value]
 
     def add(self, docs: List[MemoryDoc]) -> None:
-        if not docs: return
+        if not docs:
+            return
+
         ids: List[str] = [d.id for d in docs]
         documents: List[str] = [d.text for d in docs]
         # keep metadata values as strings to match Dict[str, str]
         metas_list: List[Dict[str, str]] = [d.meta for d in docs]
         embeds_list: List[List[float]] = self._embed(documents)
+
+        # Light-weight debug so you can see experiment/run tags flowing through
+        if metas_list:
+            sample_meta = dict(metas_list[0])
+        else:
+            sample_meta = {}
+        logger.debug(
+            "MEM_ADD collection=%s docs=%d sample_meta_keys=%s",
+            self._collection_name,
+            len(docs),
+            list(sample_meta.keys()),
+        )
 
         # Cast to Chroma’s typed aliases so Pylance is happy
         ids_t: "IDs" = cast("IDs", ids)

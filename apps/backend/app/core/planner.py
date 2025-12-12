@@ -70,7 +70,7 @@ def _get_run_config(db: Session, run_id: str) -> RunManifest:
     )
     data: dict[str, Any] = dict(mf.data or {}) if mf and getattr(mf, "data", None) else {}
 
-    return RunManifest(
+    cfg = RunManifest(
         run_id=run_id,
         model=data.get("model", settings.LLM_MODEL),
         provider=data.get("provider", settings.LLM_PROVIDER),
@@ -80,6 +80,20 @@ def _get_run_config(db: Session, run_id: str) -> RunManifest:
         prompt_context_mode=data.get("prompt_context_mode", settings.PROMPT_CONTEXT_MODE),
         use_rag=data.get("use_rag", settings.USE_RAG),
     )
+
+    logger.info(
+        "RUN_CONFIG run=%s provider=%s model=%s temp=%s exp=%s mode=%s use_rag=%s ctx_id=%s",
+        cfg.run_id,
+        cfg.provider,
+        cfg.model,
+        cfg.temperature,
+        cfg.experiment_label,
+        cfg.prompt_context_mode,
+        cfg.use_rag,
+        cfg.context_snapshot_id,
+    )
+
+    return cfg
 
 def _columns(model) -> set[str]:
     """Return the set of column names for an ORM model (works with Alembic/autogen too)."""
@@ -332,6 +346,15 @@ def finalise_plan(db: Session, run_id: str,
     )
 
     cfg = _get_run_config(db, run_id)
+    logger.info(
+        "FINALISE_PLAN_START run=%s exp=%s provider=%s model=%s mode=%s use_rag=%s",
+        run_id,
+        cfg.experiment_label,
+        cfg.provider,
+        cfg.model,
+        cfg.prompt_context_mode,
+        cfg.use_rag,
+    )
     bundle = pm.plan_remaining(
         p_req.model_dump(),
         pv,
@@ -513,6 +536,15 @@ def plan_run(db: Session, run_id: str) -> PlanBundle:
     )
 
     cfg = _get_run_config(db, run_id)
+    logger.info(
+        "PLAN_RUN_START run=%s exp=%s provider=%s model=%s mode=%s use_rag=%s",
+        run_id,
+        cfg.experiment_label,
+        cfg.provider,
+        cfg.model,
+        cfg.prompt_context_mode,
+        cfg.use_rag,
+    )
     bundle = pm.plan(
         p_req.model_dump(),
         db=db,
