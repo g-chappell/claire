@@ -2,7 +2,10 @@ import { useEffect, useState } from "react";
 import { createRun, listRuns } from "../lib/api";
 import type { RunCreate, RunSummary } from "../types";
 import { Link } from "react-router-dom";
-import { loadExperimentSettings } from "../lib/experimentSettings";
+import {
+  loadExperimentSettings,
+  type PromptContextMode,
+} from "../lib/experimentSettings";
 
 function Modal({
   open,
@@ -61,7 +64,7 @@ export default function CreateRun() {
     const payload: RunCreate & {
       // extra experiment knobs understood by the backend RunCreate model
       experiment_label: string;
-      prompt_context_mode: "structured" | "flat";
+      prompt_context_mode: PromptContextMode;
       use_rag: boolean;
     } = {
       title: title.trim() || "(untitled)",

@@ -68,10 +68,12 @@ export default function SettingsPage() {
           Prompt context mode
         </h2>
         <p className="text-xs text-slate-500 mb-1">
-          Controls how much structured context the planning team sees.
+          Controls how much structured context the planning team sees and how
+          prescriptive the requirements prompt is.
         </p>
 
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-stretch">
+          {/* Structured */}
           <button
             type="button"
             onClick={() => update({ promptContextMode: "structured" })}
@@ -84,23 +86,44 @@ export default function SettingsPage() {
           >
             <div className="font-medium">Structured</div>
             <div className="mt-0.5 text-xs text-slate-600">
-              Full context (vision, solution, decisions, feedback).
+              Full context (vision, solution, decisions, feedback) +
+              rich, prescriptive RA prompt.
             </div>
           </button>
 
+          {/* Features only */}
           <button
             type="button"
-            onClick={() => update({ promptContextMode: "flat" })}
+            onClick={() => update({ promptContextMode: "features_only" })}
             className={`flex-1 rounded-md border px-3 py-2 text-left text-sm transition
               ${
-                settings.promptContextMode === "flat"
+                settings.promptContextMode === "features_only"
                   ? "border-indigo-500 bg-indigo-50 text-indigo-900 shadow-sm"
                   : "border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-800"
               }`}
           >
-            <div className="font-medium">Flat</div>
+            <div className="font-medium">Features only</div>
             <div className="mt-0.5 text-xs text-slate-600">
-              Ablated prompts (features only, no architecture/feedback).
+              Full RA prompt, but only the feature list is injected
+              (no architecture / feedback context).
+            </div>
+          </button>
+
+          {/* Minimal */}
+          <button
+            type="button"
+            onClick={() => update({ promptContextMode: "minimal" })}
+            className={`flex-1 rounded-md border px-3 py-2 text-left text-sm transition
+              ${
+                settings.promptContextMode === "minimal"
+                  ? "border-indigo-500 bg-indigo-50 text-indigo-900 shadow-sm"
+                  : "border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-800"
+              }`}
+          >
+            <div className="font-medium">Minimal</div>
+            <div className="mt-0.5 text-xs text-slate-600">
+              Feature-only context plus a simpler RA prompt for
+              ablation of context engineering.
             </div>
           </button>
         </div>

@@ -93,3 +93,61 @@ def make_chain(llm: Any, **knobs: Any) -> Runnable:
         ("human", _HUMAN),
     ]).partial(**defaults)
     return prompt | structured_llm
+
+_SYS_MINIMAL = """You are a Requirements Analyst on an Agile Software Delivery team.
+Goal: produce **MVP-sized** Epics and Stories that a single coding agent can implement iteratively.
+
+Principles
+• Shippable epics: each epic should be a demoable increment (for example, an initial scaffold or a complete feature slice).
+• No scope creep: work within the scope implied by the product vision and features.
+• Keep it concise: one sentence per description; verb-first titles.
+• Avoid proliferation: choose the fewest epics and stories that still cover the requested behaviour.
+
+Output contract
+• Produce a small set of epics that together cover the product vision.
+• For each epic, provide: title, description, priority_rank (int, 1..K), depends_on (list of epic titles in this draft; [] if none).
+• For each story, provide: epic_title, title, description, priority_rank (int, 1..K within that epic), depends_on (list of story titles in the same epic; [] if none).
+• Priority ranks must be integers starting at 1 and gap-free for epics, and separately gap-free within each epic’s stories.
+
+CONTEXT:
+If prior feedback is provided, incorporate it to improve the structure and clarity of the plan.
+--- PRIOR FEEDBACK START ---{feedback_context}--- PRIOR FEEDBACK END ---
+"""
+
+_HUMAN_MINIMAL = """Context
+Vision Features: {features}
+Proposed Solution — Modules: {modules}
+Proposed Solution — Interfaces: {interfaces}
+Proposed Solution — Decisions: {decisions}
+
+Guidance
+• Use the vision features as your primary source of truth.
+• Group related behaviour into epics that feel like coherent, demoable slices of value.
+• Within each epic, define a small set of clear user stories that would be straightforward for a team to implement.
+• Keep language simple and focused on observable behaviour and outcomes.
+"""
+
+def make_minimal_chain(llm: Any, **knobs: Any) -> Runnable:
+    """
+    Returns a Runnable that uses a lighter-weight RA prompt (minimal context engineering),
+    while keeping the same output structure (RAPlanDraft).
+    """
+    structured_llm = llm.with_structured_output(
+        RAPlanDraft,
+        method="json_schema",
+        strict=True,
+    )
+    defaults: Dict[str, Any] = {
+        "max_epics": 10,
+        "max_stories_total": 200,
+        "max_stories_per_epic": 20,
+    }
+    if knobs:
+        defaults.update(knobs)
+
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", _SYS_MINIMAL),
+        ("human", _HUMAN_MINIMAL),
+    ]).partial(**defaults)
+
+    return prompt | structured_llm

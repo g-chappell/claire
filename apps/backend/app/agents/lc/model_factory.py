@@ -7,6 +7,9 @@ from typing import Any, Optional, cast
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.callbacks.base import BaseCallbackHandler
 
+import logging
+logger = logging.getLogger(__name__)
+
 # --- Claude Models for reference --- 
 # haiku fastest/cheapest, sonnet for coding/more expensive, opus most expensive dont use
 # versions <4 being deprecated
@@ -80,6 +83,17 @@ def make_chat_model(
     # Global inter-call delay (0 = disabled)
     delay_seconds = float(os.getenv("LLM_CALL_DELAY_SECONDS", "0"))
     _callbacks = [GlobalLLMDelayHandler(delay_seconds)] if delay_seconds > 0 else None
+
+    logger.info(
+        "LLM_FACTORY provider=%s model=%s env_model=%s temperature=%s max_retries=%s timeout=%s delay=%s",
+        provider,
+        chosen,
+        env_model,
+        temperature,
+        max_retries,
+        timeout,
+        delay_seconds,
+    )
 
     if provider == "anthropic":
         from langchain_anthropic import ChatAnthropic  # type: ignore

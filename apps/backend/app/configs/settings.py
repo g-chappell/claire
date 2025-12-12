@@ -30,9 +30,10 @@ class _Common:
     EXPERIMENT_LABEL: str = "trial1.baseline"
 
     # Prompt context mode for RA chain:
-    # "structured" = full context (features + modules + interfaces + decisions + feedback)
-    # "flat"       = features-only ablation (no architecture/feedback context)
-    PROMPT_CONTEXT_MODE: str = "structured"   # "structured" | "flat"
+    # "structured"    = full context (features + modules + interfaces + decisions + feedback)
+    # "features_only" = features-only ablation (no architecture/feedback context, but full RA prompt)
+    # "minimal"       = features-only + basic RA prompt (weakest context engineering)
+    PROMPT_CONTEXT_MODE: str = "structured"   # "structured" | "features_only" | "minimal"
 
     # Feature flags (planning output)
     FEATURE_QA: bool = False             # if False, skip generating acceptance/tests
