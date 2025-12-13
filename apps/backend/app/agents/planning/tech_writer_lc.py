@@ -4,6 +4,11 @@ from __future__ import annotations
 from langchain_core.prompts import ChatPromptTemplate
 from app.agents.lc.schemas import TechWritingBundleDraft, TaskDraft
 
+try:
+    from langchain_openai import ChatOpenAI  # type: ignore
+except Exception:  # pragma: no cover
+    ChatOpenAI = None  # type: ignore
+
 # --- Design Notes ---
 
 def make_notes_chain(llm):
@@ -37,7 +42,27 @@ def make_notes_chain(llm):
          "- Story titles: {story_titles}\n"
          "Return JSON ONLY."),
     ])
-    return prompt | llm.with_structured_output(TechWritingBundleDraft)
+    use_function_calling = False
+    if ChatOpenAI is not None:
+        try:
+            if isinstance(llm, ChatOpenAI):
+                use_function_calling = True
+        except Exception:
+            use_function_calling = False
+
+    if use_function_calling:
+        structured_llm = llm.with_structured_output(
+            TechWritingBundleDraft,
+            method="function_calling",
+        )
+    else:
+        structured_llm = llm.with_structured_output(
+            TechWritingBundleDraft,
+            method="json_schema",
+            strict=True,
+        )
+
+    return prompt | structured_llm
 
 # --- Per-story Tasks ---
 
@@ -71,5 +96,25 @@ def make_tasks_chain(llm):
             "- relevant_interfaces (optional): {interfaces}\n"
             "Return JSON ONLY."),
     ])
-    return prompt | llm.with_structured_output(TaskDraft)
+    use_function_calling = False
+    if ChatOpenAI is not None:
+        try:
+            if isinstance(llm, ChatOpenAI):
+                use_function_calling = True
+        except Exception:
+            use_function_calling = False
+
+    if use_function_calling:
+        structured_llm = llm.with_structured_output(
+            TaskDraft,
+            method="function_calling",
+        )
+    else:
+        structured_llm = llm.with_structured_output(
+            TaskDraft,
+            method="json_schema",
+            strict=True,
+        )
+
+    return prompt | structured_llm
 

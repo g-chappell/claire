@@ -253,13 +253,30 @@ class ProductManagerLLM:
     Note: This 'meta agent' is a coordinator; the only 'agents' here are the role chains.
     """
 
-    def __init__(self, model: Optional[str] = None):
-        llm = make_chat_model(model)
-        logger.info(
-            "PM_INIT provider=%s model=%s",
-            getattr(settings, "LLM_PROVIDER", "unknown"),
-            model or getattr(settings, "LLM_MODEL", "unknown"),
+    def __init__(
+        self,
+        model: Optional[str] = None,
+        provider: Optional[str] = None,
+        temperature: Optional[float] = None,
+    ):
+        # Fall back to settings when not provided explicitly
+        model_name = model or getattr(settings, "LLM_MODEL", None)
+        provider_name = (provider or getattr(settings, "LLM_PROVIDER", "anthropic")).lower()
+        temp = temperature if temperature is not None else getattr(settings, "TEMPERATURE", 0.2)
+
+        llm = make_chat_model(
+            model=model_name,
+            temperature=temp,
+            provider=provider_name,  # <-- now honours per-run provider
         )
+
+        logger.info(
+            "PM_INIT provider=%s model=%s temp=%s",
+            provider_name,
+            model_name,
+            temp,
+        )
+
         self.vision_chain = VISION.make_chain(llm)
         self.arch_chain = ARCH.make_chain(llm)
         # RA chains:

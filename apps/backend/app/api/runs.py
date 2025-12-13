@@ -58,11 +58,39 @@ def create_run(payload: RunCreate, db: Session = Depends(get_db)):
     else:
         rag_flag = bool(payload_use_rag)
 
+    # NEW: provider snapshot – prefer per-run if supplied
+    raw_provider = getattr(payload, "llm_provider", None)
+    if raw_provider:
+        provider = raw_provider.strip().lower()
+    else:
+        provider = getattr(settings, "LLM_PROVIDER", None)
+
+    # NEW: pick model based on provider snapshot
+    # Env layout:
+    #   ANTHROPIC_MODEL = e.g. "claude-sonnet-4-5-20250929"
+    #   OPENAI_MODEL    = e.g. "gpt-5.1-2025-11-13"
+    #
+    # LLM_MODEL (if present) acts as a generic fallback.
+    if provider == "openai":
+        model = getattr(settings, "OPENAI_MODEL", None) or getattr(settings, "LLM_MODEL", None)
+    elif provider == "anthropic":
+        model = getattr(settings, "ANTHROPIC_MODEL", None) or getattr(settings, "LLM_MODEL", None)
+    else:
+        # Fallback if provider is missing/unknown
+        model = getattr(settings, "LLM_MODEL", None)
+
+    # Final safety net: if still missing, set a sensible default
+    if not model:
+        if provider == "openai":
+            model = "gpt-5.1-2025-11-13"
+        else:
+            model = "claude-sonnet-4-5-20250929" 
+
     manifest = RunManifestORM(
         run_id=run_id,
         data={
-            "model": settings.LLM_MODEL,
-            "provider": settings.LLM_PROVIDER,
+            "model": model,
+            "provider": provider,
             "temperature": settings.TEMPERATURE,
             "context_snapshot_id": str(uuid.uuid4()),
             # --- experiment snapshot at creation time ---

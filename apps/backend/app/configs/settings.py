@@ -24,6 +24,10 @@ class _Common:
     TEMPERATURE: float = 0.2
     LLM_CALL_DELAY_SECONDS: float = 5.0    # default spacing; set to 0 to disable
 
+    # NEW: per-provider models (optional)
+    ANTHROPIC_MODEL: Optional[str] = None
+    OPENAI_MODEL: Optional[str] = None
+
     # Experiments / trials
     # Human-readable label you use in analysis to group runs
     # e.g. "trial1.baseline", "trial2.memory", "trial3.best", "ablation.rag_off"

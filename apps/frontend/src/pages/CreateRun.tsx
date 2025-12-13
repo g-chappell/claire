@@ -59,25 +59,27 @@ export default function CreateRun() {
   useEffect(() => { refresh().catch(console.error); }, []);
 
   async function onCreate() {
-    const exp = loadExperimentSettings();
+  const exp = loadExperimentSettings();
 
-    const payload: RunCreate & {
-      // extra experiment knobs understood by the backend RunCreate model
-      experiment_label: string;
-      prompt_context_mode: PromptContextMode;
-      use_rag: boolean;
-    } = {
-      title: title.trim() || "(untitled)",
-      requirement_title: reqTitle.trim() || "As a user, I want …",
-      requirement_description: reqDesc.trim() || "Describe the requirement…",
-      constraints: [],
-      priority: "Should",
-      non_functionals: [],
-      // snapshot of current experiment settings
-      experiment_label: exp.experimentLabel,
-      prompt_context_mode: exp.promptContextMode,
-      use_rag: exp.useRag,
-    };
+  const payload: RunCreate & {
+    // extra experiment knobs understood by the backend RunCreate model
+    experiment_label: string;
+    prompt_context_mode: PromptContextMode;
+    use_rag: boolean;
+    llm_provider: string;   // NEW
+  } = {
+    title: title.trim() || "(untitled)",
+    requirement_title: reqTitle.trim() || "As a user, I want …",
+    requirement_description: reqDesc.trim() || "Describe the requirement…",
+    constraints: [],
+    priority: "Should",
+    non_functionals: [],
+    // snapshot of current experiment settings
+    experiment_label: exp.experimentLabel,
+    prompt_context_mode: exp.promptContextMode,
+    use_rag: exp.useRag,
+    llm_provider: exp.llmProvider,   // NEW
+  };
 
     setBusy(true);
     try {

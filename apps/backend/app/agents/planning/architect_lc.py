@@ -6,6 +6,12 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import Runnable
 from app.agents.lc.schemas import TechnicalSolutionDraft
 from langchain_core.language_models import BaseChatModel
+
+# Optional: used only to detect OpenAI for structured-output mode switching
+try:
+    from langchain_openai import ChatOpenAI  # type: ignore
+except Exception:  # pragma: no cover
+    ChatOpenAI = None  # type: ignore
  
 _SYSTEM = (
     "You are a Solution Architect for lightweight web apps. Design a **minimal, testable MVP** that satisfies the given requirement.\n"
@@ -50,4 +56,26 @@ def make_chain(llm: BaseChatModel, **knobs: Any) -> Runnable:
     if knobs:
         defaults.update(knobs)
     prompt = _PROMPT.partial(**defaults)
-    return prompt | llm.with_structured_output(TechnicalSolutionDraft)
+
+    # Choose structured-output mode based on provider
+    use_function_calling = False
+    if ChatOpenAI is not None:
+        try:
+            if isinstance(llm, ChatOpenAI):
+                use_function_calling = True
+        except Exception:
+            use_function_calling = False
+
+    if use_function_calling:
+        structured_llm = llm.with_structured_output(
+            TechnicalSolutionDraft,
+            method="function_calling",
+        )
+    else:
+        structured_llm = llm.with_structured_output(
+            TechnicalSolutionDraft,
+            method="json_schema",
+            strict=True,
+        )
+
+    return prompt | structured_llm

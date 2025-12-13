@@ -1,11 +1,13 @@
 // lib/experimentSettings.ts
 
 export type PromptContextMode = "structured" | "features_only" | "minimal";
+export type LlmProvider = "anthropic" | "openai";
 
 export type ExperimentSettings = {
   experimentLabel: string;
   promptContextMode: PromptContextMode;
   useRag: boolean;
+  llmProvider: LlmProvider;
 };
 
 const STORAGE_KEY = "claire.experimentSettings.v1";
@@ -16,6 +18,7 @@ export function loadExperimentSettings(): ExperimentSettings {
       experimentLabel: "trial1.baseline",
       promptContextMode: "structured",
       useRag: true,
+      llmProvider: "anthropic",   // default
     };
   }
 
@@ -25,6 +28,7 @@ export function loadExperimentSettings(): ExperimentSettings {
       experimentLabel: "trial1.baseline",
       promptContextMode: "structured",
       useRag: true,
+      llmProvider: "anthropic",
     };
   }
 
@@ -32,6 +36,7 @@ export function loadExperimentSettings(): ExperimentSettings {
     const parsed = JSON.parse(raw) as Partial<ExperimentSettings> & {
       // for back-compat, allow legacy "flat" string
       promptContextMode?: string;
+      llmProvider?: string;
     };
 
     let mode: PromptContextMode = "structured";
@@ -48,16 +53,25 @@ export function loadExperimentSettings(): ExperimentSettings {
       mode = rawMode as PromptContextMode;
     }
 
+    let provider: LlmProvider = "anthropic";
+    if (parsed.llmProvider === "openai") {
+      provider = "openai";
+    } else if (parsed.llmProvider === "anthropic") {
+      provider = "anthropic";
+    }
+
     return {
       experimentLabel: parsed.experimentLabel ?? "trial1.baseline",
       promptContextMode: mode,
       useRag: typeof parsed.useRag === "boolean" ? parsed.useRag : true,
+      llmProvider: provider,
     };
   } catch {
     return {
       experimentLabel: "trial1.baseline",
       promptContextMode: "structured",
       useRag: true,
+      llmProvider: "anthropic",
     };
   }
 }

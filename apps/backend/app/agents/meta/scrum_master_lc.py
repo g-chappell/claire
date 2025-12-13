@@ -2,6 +2,9 @@
 from __future__ import annotations
 from typing import Literal, Optional, Tuple
 from sqlalchemy.orm import Session
+
+from app.configs.settings import get_settings
+from app.storage.models import RunManifestORM
 from app.agents.lc.model_factory import make_chat_model
 
 # Artefact kinds we support
@@ -65,7 +68,32 @@ def generate_ai_feedback(
         "Write the AI feedback now."
     )
 
-    llm = make_chat_model()
+    # --- Resolve provider/model/temperature from RunManifest snapshot ---
+    settings = get_settings()
+    mf: Optional[RunManifestORM] = (
+        db.query(RunManifestORM).filter_by(run_id=run_id).first()
+    )
+    data = (mf.data or {}) if mf and getattr(mf, "data", None) else {}
+
+    raw_provider = (
+        data.get("provider")
+        or getattr(settings, "LLM_PROVIDER", None)
+        or ""
+    )
+    provider = raw_provider.strip().lower() or None
+
+    model = data.get("model") or getattr(settings, "LLM_MODEL", None)
+
+    temp_val = data.get("temperature", None)
+    try:
+        temperature = float(
+            temp_val if temp_val is not None else getattr(settings, "TEMPERATURE", 0.2)
+        )
+    except Exception:
+        temperature = float(getattr(settings, "TEMPERATURE", 0.2))
+
+    llm = make_chat_model(model=model, temperature=temperature, provider=provider)
+
     msg = llm.invoke([
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": prompt_user},

@@ -9,6 +9,7 @@ export default function SettingsPage() {
   const [settings, setSettings] = useState<ExperimentSettings>(() =>
     loadExperimentSettings()
   );
+  
 
   useEffect(() => {
     saveExperimentSettings(settings);
@@ -163,6 +164,53 @@ export default function SettingsPage() {
             {settings.useRag ? "RAG enabled" : "RAG disabled"}
           </span>
         </label>
+      </section>
+
+       {/* LLM provider */}
+      <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm space-y-3">
+        <h2 className="text-sm font-semibold text-slate-800">
+          LLM provider
+        </h2>
+        <p className="text-xs text-slate-500">
+          Choose which LLM backend CLAIRE should use for planning and execution.
+          Ensure the matching API key is configured in the backend environment.
+        </p>
+
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-stretch mt-1">
+          {/* Anthropic */}
+          <button
+            type="button"
+            onClick={() => update({ llmProvider: "anthropic" })}
+            className={`flex-1 rounded-md border px-3 py-2 text-left text-sm transition
+              ${
+                settings.llmProvider === "anthropic"
+                  ? "border-indigo-500 bg-indigo-50 text-indigo-900 shadow-sm"
+                  : "border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-800"
+              }`}
+          >
+            <div className="font-medium">Anthropic (Claude)</div>
+            <div className="mt-0.5 text-xs text-slate-600">
+              Use Claude Sonnet for planning and coding.
+            </div>
+          </button>
+
+          {/* OpenAI */}
+          <button
+            type="button"
+            onClick={() => update({ llmProvider: "openai" })}
+            className={`flex-1 rounded-md border px-3 py-2 text-left text-sm transition
+              ${
+                settings.llmProvider === "openai"
+                  ? "border-indigo-500 bg-indigo-50 text-indigo-900 shadow-sm"
+                  : "border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-800"
+              }`}
+          >
+            <div className="font-medium">OpenAI</div>
+            <div className="mt-0.5 text-xs text-slate-600">
+              Use OpenAI models (e.g. GPT-4.x) instead.
+            </div>
+          </button>
+        </div>
       </section>
 
     </div>
