@@ -5,6 +5,12 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import Runnable
  
 from app.agents.lc.schemas import ProductVisionDraft
+
+# Optional: used only to detect OpenAI for structured-output mode switching
+try:
+    from langchain_openai import ChatOpenAI  # type: ignore
+except Exception:  # pragma: no cover
+    ChatOpenAI = None  # type: ignore
  
 _SYSTEM = (
     "You are a Product Manager for software development, producing a concise Product Vision as structured JSON.\n"
@@ -47,4 +53,25 @@ def make_chain(llm: Any, **knobs: Any) -> Runnable:
     defaults.setdefault("human_context", "")
     defaults.setdefault("repo_conventions", "")
     prompt = _PROMPT.partial(**defaults)
-    return prompt | llm.with_structured_output(ProductVisionDraft)
+
+    use_function_calling = False
+    if ChatOpenAI is not None:
+        try:
+            if isinstance(llm, ChatOpenAI):
+                use_function_calling = True
+        except Exception:
+            use_function_calling = False
+
+    if use_function_calling:
+        structured_llm = llm.with_structured_output(
+            ProductVisionDraft,
+            method="function_calling",
+        )
+    else:
+        structured_llm = llm.with_structured_output(
+            ProductVisionDraft,
+            method="json_schema",
+            strict=True,
+        )
+
+    return prompt | structured_llm

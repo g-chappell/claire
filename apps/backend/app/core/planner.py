@@ -54,7 +54,6 @@ def _coerce_task_status(v) -> TaskStatus:
         s = "todo"
     return cast(TaskStatus, s)
 
-pm = ProductManagerLLM()
 
 # --- helpers ---------------------------------------------------------------
 
@@ -94,6 +93,17 @@ def _get_run_config(db: Session, run_id: str) -> RunManifest:
     )
 
     return cfg
+
+def _build_pm_from_cfg(cfg: RunManifest) -> ProductManagerLLM:
+    """
+    Construct a ProductManagerLLM bound to this run's manifest snapshot.
+    This is where we honour the per-run provider/model/temperature.
+    """
+    return ProductManagerLLM(
+        model=cfg.model,
+        provider=cfg.provider,
+        temperature=cfg.temperature,
+    )
 
 def _columns(model) -> set[str]:
     """Return the set of column names for an ORM model (works with Alembic/autogen too)."""
@@ -258,6 +268,10 @@ def _persist_vision_solution(db: Session, run_id: str,
 # --- NEW: stage 1 - generate PV/TS only ---
 def generate_vision_solution(db: Session, run_id: str, rag_context: str | None = None,) -> tuple[ProductVision, TechnicalSolution]:
     """Run Vision + Architecture chains and persist only those results."""
+
+    cfg = _get_run_config(db, run_id)
+    pm = _build_pm_from_cfg(cfg)
+
     req: RequirementORM | None = (
         db.query(RequirementORM)
         .filter(RequirementORM.run_id == run_id)
@@ -346,6 +360,7 @@ def finalise_plan(db: Session, run_id: str,
     )
 
     cfg = _get_run_config(db, run_id)
+
     logger.info(
         "FINALISE_PLAN_START run=%s exp=%s provider=%s model=%s mode=%s use_rag=%s",
         run_id,
@@ -355,6 +370,9 @@ def finalise_plan(db: Session, run_id: str,
         cfg.prompt_context_mode,
         cfg.use_rag,
     )
+
+    pm = _build_pm_from_cfg(cfg)
+
     bundle = pm.plan_remaining(
         p_req.model_dump(),
         pv,
@@ -545,6 +563,9 @@ def plan_run(db: Session, run_id: str) -> PlanBundle:
         cfg.prompt_context_mode,
         cfg.use_rag,
     )
+
+    pm = _build_pm_from_cfg(cfg)
+    
     bundle = pm.plan(
         p_req.model_dump(),
         db=db,

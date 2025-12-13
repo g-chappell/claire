@@ -9,6 +9,11 @@ from langchain_core.runnables import Runnable
 
 from app.agents.lc.schemas import QASpec
 
+try:
+    from langchain_openai import ChatOpenAI  # type: ignore
+except Exception:  # pragma: no cover
+    ChatOpenAI = None  # type: ignore
+
 _SYSTEM = (
     "You are the QA Planner for this run. Your job is to specify **what to test** and "
     "**how to verify behavior** without prescribing implementation details (paths, tools, or frameworks).\n\n"
@@ -52,4 +57,24 @@ _PROMPT = ChatPromptTemplate.from_messages(
 )
 
 def make_chain(llm: BaseChatModel) -> Runnable:
-    return _PROMPT | llm.with_structured_output(QASpec)
+    use_function_calling = False
+    if ChatOpenAI is not None:
+        try:
+            if isinstance(llm, ChatOpenAI):
+                use_function_calling = True
+        except Exception:
+            use_function_calling = False
+
+    if use_function_calling:
+        structured_llm = llm.with_structured_output(
+            QASpec,
+            method="function_calling",
+        )
+    else:
+        structured_llm = llm.with_structured_output(
+            QASpec,
+            method="json_schema",
+            strict=True,
+        )
+
+    return _PROMPT | structured_llm

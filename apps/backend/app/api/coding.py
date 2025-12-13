@@ -10,7 +10,14 @@ from langchain_core.messages import HumanMessage
 
 from app.storage.db import get_db
 from app.storage.models import (
-    RunORM, ProductVisionORM, TechnicalSolutionORM, EpicORM, StoryORM, TaskORM, AcceptanceORM
+    RunORM,
+    ProductVisionORM,
+    TechnicalSolutionORM,
+    EpicORM,
+    StoryORM,
+    TaskORM,
+    AcceptanceORM,
+    RunManifestORM,
 )
 from app.configs.settings import get_settings
 from app.agents.coding.coding_agent import CodingAgent
@@ -184,6 +191,35 @@ def _tasks_for_story(db: Session, run_id: str, story_id: Union[str, int]) -> Lis
         # If the dialect or attribute fails, always fall back to id
         return q.order_by(TaskORM.id.asc()).all()
 
+def _run_llm_config(db: Session, run_id: str) -> tuple[Optional[str], Optional[str], float]:
+    """
+    Resolve provider/model/temperature for a run from its manifest,
+    falling back to global settings when missing.
+    """
+    settings = get_settings()
+    mf: Optional[RunManifestORM] = (
+        db.query(RunManifestORM).filter_by(run_id=run_id).first()
+    )
+    data = (mf.data or {}) if mf and getattr(mf, "data", None) else {}
+
+    raw_provider = (
+        data.get("provider")
+        or getattr(settings, "LLM_PROVIDER", None)
+        or ""
+    )
+    provider = raw_provider.strip().lower() or None
+
+    model = data.get("model") or getattr(settings, "LLM_MODEL", None)
+
+    temp_val = data.get("temperature", None)
+    try:
+        temperature = float(
+            temp_val if temp_val is not None else getattr(settings, "TEMPERATURE", 0.2)
+        )
+    except Exception:
+        temperature = float(getattr(settings, "TEMPERATURE", 0.2))
+
+    return provider, model, temperature
 
 @router.get("/runs/{run_id}/tools")
 async def list_serena_tools(run_id: str, request: Request):
@@ -204,7 +240,8 @@ async def implement_story(run_id: str, story_id: str, request: Request, db: Sess
         raise HTTPException(status_code=404, detail="story not found")
 
     project_dir = _ensure_workspace(run_id)
-    agent = CodingAgent()
+    provider, model, temperature = _run_llm_config(db, run_id)
+    agent = CodingAgent(model=model, temperature=temperature, provider=provider)
 
     # Use PV/TS helpers (safe getattr/cast) for type-checker friendliness
     pvs, tss = _pv_ts_strings(db, run_id)
@@ -277,7 +314,8 @@ async def implement_story_stream(
         raise HTTPException(status_code=404, detail="story not found")
 
     project_dir = _ensure_workspace(run_id)
-    agent = CodingAgent()
+    provider, model, temperature = _run_llm_config(db, run_id)
+    agent = CodingAgent(model=model, temperature=temperature, provider=provider)
 
     # Shared context (PV/TS/epic/acceptance)
     pvs, tss = _pv_ts_strings(db, run_id)
@@ -423,7 +461,8 @@ async def execute_plan(
         raise HTTPException(status_code=404, detail="run not found")
 
     project_dir = _ensure_workspace(run_id)
-    agent = CodingAgent()
+    provider, model, temperature = _run_llm_config(db, run_id)
+    agent = CodingAgent(model=model, temperature=temperature, provider=provider)
     pvs, tss = _pv_ts_strings(db, run_id)
 
     # Load all epics/stories for the run

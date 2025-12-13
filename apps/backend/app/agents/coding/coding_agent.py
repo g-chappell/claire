@@ -106,12 +106,22 @@ def _tool_signature(ev: dict) -> str:
     return f"{event_type}:{name}:{s}"
 
 class CodingAgent:
-    def __init__(self, model: Optional[str] = None, temperature: float = 0.0):
-            # keep a handle to settings for later (recursion_limit, etc.)
-            self.settings = get_settings()
-            # use your factory, which already returns a BaseChatModel with retries/timeouts set
-            self.llm: BaseChatModel = make_chat_model(model=model, temperature=temperature)
-            # NOTE: avoid .bind(...) here because it returns a Runnable (breaks create_agent typing)
+    def __init__(
+        self,
+        model: Optional[str] = None,
+        temperature: float = 0.0,
+        *,
+        provider: Optional[str] = None,
+    ):
+        # keep a handle to settings for later (recursion_limit, etc.)
+        self.settings = get_settings()
+        # use your factory, which already returns a BaseChatModel with retries/timeouts set
+        self.llm: BaseChatModel = make_chat_model(
+            model=model,
+            temperature=temperature,
+            provider=provider,
+        )
+        # NOTE: avoid .bind(...) here because it returns a Runnable (breaks create_agent typing)
 
     async def astream_events(self, state: Dict[str, Any], config: Optional[Dict[str, Any]] = None) -> AsyncIterator[Dict[str, Any]]:
         runnable: Optional[_SupportsAStreamEvents] = None

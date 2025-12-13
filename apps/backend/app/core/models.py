@@ -108,6 +108,10 @@ class RunCreate(BaseModel):
     non_functionals: list[str] = Field(default_factory=list)
 
     # --- Experiment knobs (optional on input) ---
+    llm_provider: Optional[str] = Field(
+        default=None,
+        description="Preferred LLM provider for this run (e.g. 'anthropic' or 'openai')",
+    )
     experiment_label: Optional[str] = Field(
         default=None,
         description="Human-readable trial/ablation label; falls back to settings.EXPERIMENT_LABEL",

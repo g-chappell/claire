@@ -57,18 +57,20 @@ def make_chat_model(
     model: Optional[str] = None,
     temperature: Optional[float] = None,
     *,
+    provider: Optional[str] = None,
     max_retries: Optional[int] = None,
     timeout: Optional[float] = None,
 ) -> BaseChatModel:
     """
     Build a Chat model for the configured provider.
 
-    - Adds sane defaults for retries/timeouts (env-overridable):
-        LLM_MAX_RETRIES (default 6), LLM_TIMEOUT (default 60s)
-    - Handles Anthropic's model/model_name kwarg differences across versions.
-    - Handles OpenAI's timeout/request_timeout kwarg differences across versions.
+    - If `provider` is passed, use it (anthropic|openai).
+    - Otherwise fall back to env-based _infer_provider().
     """
-    provider = _infer_provider()
+    if provider:
+        provider = provider.strip().lower()
+    else:
+        provider = _infer_provider()
 
     if temperature is None:
         temperature = float(os.getenv("TEMPERATURE", "0.2"))
@@ -78,7 +80,9 @@ def make_chat_model(
         timeout = float(os.getenv("LLM_TIMEOUT", "180"))
 
     env_model = os.getenv("LLM_MODEL")
-    chosen = model or env_model or ("claude-sonnet-4-5-20250929" if provider == "anthropic" else "gpt-4o-mini")
+    chosen = model or env_model or (
+        "claude-sonnet-4-5-20250929" if provider == "anthropic" else "gpt-4o-mini"
+    )
 
     # Global inter-call delay (0 = disabled)
     delay_seconds = float(os.getenv("LLM_CALL_DELAY_SECONDS", "0"))

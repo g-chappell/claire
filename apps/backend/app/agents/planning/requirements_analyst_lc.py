@@ -6,6 +6,12 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import Runnable
 from app.agents.lc.schemas import RAPlanDraft
 
+# Optional: only used to detect OpenAI for structured-output method switching
+try:
+    from langchain_openai import ChatOpenAI  # type: ignore
+except Exception:  # pragma: no cover
+    ChatOpenAI = None  # type: ignore
+
 _SYS = """You are a Requirements Analyst on an Agile Software Delivery team.
 Goal: produce **MVP-sized** Epics and Stories that a single coding agent can implement iteratively.
 
@@ -74,13 +80,34 @@ Guidance
 def make_chain(llm: Any, **knobs: Any) -> Runnable:
     """
     Returns a Runnable mapping {features, modules, interfaces, decisions} -> RAPlanDraft.
-    Soft caps are configurable via kwargs: max_epics, max_stories_total, max_stories_per_epic.
+
+    For Anthropic (Claude) we use the new JSON-schema structured outputs.
+    For OpenAI we fall back to function-calling structured outputs to avoid
+    the stricter `response_format` schema validation.
     """
-    structured_llm = llm.with_structured_output(
-        RAPlanDraft,
-        method="json_schema",
-        strict=True,
-    )
+    use_function_calling = False
+
+    # Detect ChatOpenAI safely (ChatOpenAI may be None if import failed)
+    if ChatOpenAI is not None:
+        try:
+            if isinstance(llm, ChatOpenAI):
+                use_function_calling = True
+        except Exception:
+            # If type checking fails for any reason, just fall back to json_schema
+            use_function_calling = False
+
+    if use_function_calling:
+        structured_llm = llm.with_structured_output(
+            RAPlanDraft,
+            method="function_calling",
+        )
+    else:
+        structured_llm = llm.with_structured_output(
+            RAPlanDraft,
+            method="json_schema",
+            strict=True,
+        )
+
     defaults: Dict[str, Any] = {
         "max_epics": 10,
         "max_stories_total": 200,
@@ -88,10 +115,12 @@ def make_chain(llm: Any, **knobs: Any) -> Runnable:
     }
     if knobs:
         defaults.update(knobs)
+
     prompt = ChatPromptTemplate.from_messages([
         ("system", _SYS),
         ("human", _HUMAN),
     ]).partial(**defaults)
+
     return prompt | structured_llm
 
 _SYS_MINIMAL = """You are a Requirements Analyst on an Agile Software Delivery team.
@@ -132,11 +161,26 @@ def make_minimal_chain(llm: Any, **knobs: Any) -> Runnable:
     Returns a Runnable that uses a lighter-weight RA prompt (minimal context engineering),
     while keeping the same output structure (RAPlanDraft).
     """
-    structured_llm = llm.with_structured_output(
-        RAPlanDraft,
-        method="json_schema",
-        strict=True,
-    )
+    use_function_calling = False
+    if ChatOpenAI is not None:
+        try:
+            if isinstance(llm, ChatOpenAI):
+                use_function_calling = True
+        except Exception:
+            use_function_calling = False
+
+    if use_function_calling:
+        structured_llm = llm.with_structured_output(
+            RAPlanDraft,
+            method="function_calling",
+        )
+    else:
+        structured_llm = llm.with_structured_output(
+            RAPlanDraft,
+            method="json_schema",
+            strict=True,
+        )
+
     defaults: Dict[str, Any] = {
         "max_epics": 10,
         "max_stories_total": 200,
