@@ -114,6 +114,10 @@ def post_vision_solution(
         mf_data = dict(mf.data or {}) if mf and getattr(mf, "data", None) else {}
         manifest_use_rag = mf_data.get("use_rag")
         exp_label = mf_data.get("experiment_label")
+        prompt_mode = mf_data.get(
+            "prompt_context_mode",
+            getattr(settings, "PROMPT_CONTEXT_MODE", "structured"),
+        )
 
         # Decide whether RAG is enabled and where that decision came from
         if use_rag is not None:
@@ -157,6 +161,10 @@ def post_vision_solution(
                     requirement_description=req.description,
                     types=("product_vision", "technical_solution"),
                     top_k=settings.RAG_TOP_K,
+                    run_id=run_id,
+                    experiment_label=exp_label,
+                    prompt_context_mode=prompt_mode,
+                    phase="planning",
                 )
                 rag_context = ctx_text
                 logger.info(

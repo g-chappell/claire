@@ -5,6 +5,8 @@ from fastapi import Request
 from pydantic import BaseModel, Field
 
 from langchain_core.tools import StructuredTool, BaseTool
+from app.core.metrics import log_tool_call
+import time
 
 # Your MCP client loader (names match common setups; keep as in your project)
 from langchain_mcp_adapters.client import MultiServerMCPClient
@@ -56,6 +58,8 @@ async def get_serena_tools(request: Request, project_dir: Optional[str] = None) 
     """
     settings = get_settings()
     project = os.path.abspath(project_dir or settings.SERENA_PROJECT_DIR)
+    # Infer run_id from the project directory name (e.g. .../code/<run_id>)
+    run_id_for_metrics = os.path.basename(project.rstrip(os.sep)) or "unknown"
 
     command = getattr(settings, "SERENA_COMMAND", "start-mcp-server")
     args = getattr(settings, "SERENA_ARGS", ["serena"])
@@ -215,6 +219,11 @@ async def get_serena_tools(request: Request, project_dir: Optional[str] = None) 
 
             # one place to call MCP tools regardless of arun/ainvoke/invoke/run
             async def _call(tool: Optional[BaseTool], payload: dict):
+                """
+                Wrapper around Serena MCP tools with:
+                - LS readiness backoff (unchanged behaviour)
+                - Tool-call metrics (phase='coding', agent='coding_agent', tool_type='serena')
+                """
                 if tool is None:
                     raise RuntimeError(f"Requested tool is not available. payload={payload}")
 
@@ -228,30 +237,68 @@ async def get_serena_tools(request: Request, project_dir: Optional[str] = None) 
                     "not ready", "timeout waiting", "LSP", "server to become ready"
                 )
 
-                for attempt in range(max_retries + 1):
+                tool_name = getattr(tool, "name", "") or "unknown"
+                start_time = time.time()
+                error: Exception | None = None
+                result: Any = None
+
+                try:
+                    for attempt in range(max_retries + 1):
+                        try:
+                            if hasattr(tool, "ainvoke"):
+                                result = await getattr(tool, "ainvoke")(payload)  # type: ignore
+                            elif hasattr(tool, "arun"):
+                                result = await getattr(tool, "arun")(payload)     # type: ignore
+                            elif hasattr(tool, "invoke"):
+                                result = getattr(tool, "invoke")(payload)         # type: ignore
+                            elif hasattr(tool, "run"):
+                                result = getattr(tool, "run")(payload)            # type: ignore
+                            else:
+                                raise RuntimeError(f"Tool {tool_name} has no callable interface")
+                            # success – break retry loop
+                            break
+                        except Exception as e:
+                            err_txt = (str(e) or "").lower()
+                            # If it smells like "LS not ready" and we still have retries, back off then retry
+                            if any(m in err_txt for m in ls_err_markers) and attempt < max_retries:
+                                sleep_for = base_sleep * (attempt + 1)
+                                logger.warning(
+                                    "Serena tool '%s' hit LS-not-ready (%s). Retrying in %.2fs (attempt %d/%d). Payload=%r",
+                                    tool_name, e, sleep_for, attempt + 1, max_retries, payload
+                                )
+                                await asyncio.sleep(sleep_for)
+                                continue
+                            # otherwise, bubble it up (will be logged in finally)
+                            error = e
+                            raise
+                    return result
+                finally:
+                    end_time = time.time()
                     try:
-                        if hasattr(tool, "ainvoke"):
-                            return await getattr(tool, "ainvoke")(payload)  # type: ignore
-                        if hasattr(tool, "arun"):
-                            return await getattr(tool, "arun")(payload)     # type: ignore
-                        if hasattr(tool, "invoke"):
-                            return getattr(tool, "invoke")(payload)         # type: ignore
-                        if hasattr(tool, "run"):
-                            return getattr(tool, "run")(payload)            # type: ignore
-                        raise RuntimeError(f"Tool {getattr(tool,'name','')} has no callable interface")
-                    except Exception as e:
-                        # If it smells like "LS not ready" and we still have retries, back off then retry
-                        err_txt = (str(e) or "").lower()
-                        if any(m in err_txt for m in ls_err_markers) and attempt < max_retries:
-                            sleep_for = base_sleep * (attempt + 1)
-                            logger.warning(
-                                "Serena tool '%s' hit LS-not-ready (%s). Retrying in %.2fs (attempt %d/%d). Payload=%r",
-                                getattr(tool, "name", ""), e, sleep_for, attempt + 1, max_retries, payload
-                            )
-                            await asyncio.sleep(sleep_for)
-                            continue
-                        # otherwise, bubble it up
-                        raise
+                        # keep meta compact – avoid full payload contents
+                        meta: Dict[str, Any] = {
+                            "payload_keys": list(payload.keys()),
+                        }
+                        if "relative_path" in payload:
+                            meta["relative_path"] = payload["relative_path"]
+                        if "name_path" in payload:
+                            meta["name_path"] = payload["name_path"]
+                        if error is not None:
+                            meta["error"] = str(error)
+
+                        log_tool_call(
+                            run_id=run_id_for_metrics,
+                            phase="coding",
+                            agent="coding_agent",
+                            tool_type="serena",
+                            tool_name=tool_name,
+                            start_time=start_time,
+                            end_time=end_time,
+                            meta=meta,
+                        )
+                    except Exception:
+                        # metrics must not affect normal tool behaviour
+                        pass
 
             _find_symbol = _get("find_symbol")
             _replace_symbol_body = _get("replace_symbol_body")

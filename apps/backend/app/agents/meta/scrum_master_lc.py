@@ -2,10 +2,12 @@
 from __future__ import annotations
 from typing import Literal, Optional, Tuple
 from sqlalchemy.orm import Session
+import time
 
 from app.configs.settings import get_settings
 from app.storage.models import RunManifestORM
 from app.agents.lc.model_factory import make_chat_model
+from app.core.metrics import log_llm_call
 
 # Artefact kinds we support
 Kind = Literal["epic", "story", "task"]
@@ -47,6 +49,13 @@ def generate_ai_feedback(
 ) -> Tuple[str, str]:
     """
     Returns (ai_feedback, used_model)
+
+    Now instrumented with metrics:
+    - phase: "retrospective"
+    - agent: "scrum_master"
+    - run_id: this run
+    - story_id: artefact_id if kind == "story" else None
+    - metadata: {"kind": kind, "artefact_id": artefact_id}
     """
     from app.storage.models import EpicORM, StoryORM, TaskORM
 
@@ -93,38 +102,97 @@ def generate_ai_feedback(
         temperature = float(getattr(settings, "TEMPERATURE", 0.2))
 
     llm = make_chat_model(model=model, temperature=temperature, provider=provider)
+    used_model = getattr(llm, "model_name", getattr(llm, "model", "unknown"))
 
-    msg = llm.invoke([
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": prompt_user},
-    ])
+    # Build a single text blob for metrics (system + user)
+    full_prompt = (
+        f"[SYSTEM]\n{SYSTEM_PROMPT}\n\n"
+        f"[USER]\n{prompt_user}"
+    )
 
-    def _to_text(content) -> str:
-        # Normalize Anthropic/OpenAI-style message content into a plain string.
-        if isinstance(content, str):
-            return content
-        if isinstance(content, list):
-            parts = []
-            for part in content:
-                if isinstance(part, dict):
-                    # Anthropic/OpenAI SDKs often expose {"type": "text", "text": "..."} or similar
-                    parts.append(str(part.get("text") or part.get("content") or ""))
-                else:
-                    # Fallback for SDK-specific objects (e.g., content blocks)
-                    text_attr = getattr(part, "text", None)
-                    if text_attr is not None:
-                        parts.append(str(text_attr))
+    start_time = time.time()
+    ai_text: str = ""
+
+    try:
+        msg = llm.invoke([
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": prompt_user},
+        ])
+
+        def _to_text(content) -> str:
+            # Normalize Anthropic/OpenAI-style message content into a plain string.
+            if isinstance(content, str):
+                return content
+            if isinstance(content, list):
+                parts = []
+                for part in content:
+                    if isinstance(part, dict):
+                        # Anthropic/OpenAI SDKs often expose {"type": "text", "text": "..."} or similar
+                        parts.append(str(part.get("text") or part.get("content") or ""))
                     else:
-                        parts.append(str(part))
-            return "".join(parts)
-        # Final fallback
-        try:
-            return str(content)
-        except Exception:
-            return ""
+                        # Fallback for SDK-specific objects (e.g., content blocks)
+                        text_attr = getattr(part, "text", None)
+                        if text_attr is not None:
+                            parts.append(str(text_attr))
+                        else:
+                            parts.append(str(part))
+                return "".join(parts)
+            # Final fallback
+            try:
+                return str(content)
+            except Exception:
+                return ""
 
-    ai_text = _to_text(getattr(msg, "content", msg)).strip()
+        ai_text = _to_text(getattr(msg, "content", msg)).strip()
+        end_time = time.time()
+
+        # Metrics: successful Scrum Master feedback call
+        try:
+            log_llm_call(
+                run_id=run_id,
+                phase="retrospective",
+                agent="scrum_master",
+                provider=(provider or "unknown"),
+                model=used_model,
+                start_time=start_time,
+                end_time=end_time,
+                input_text=full_prompt,
+                output_text=ai_text,
+                story_id=artefact_id if kind == "story" else None,
+                metadata={
+                    "kind": kind,
+                    "artefact_id": artefact_id,
+                },
+            )
+        except Exception:
+            # Metrics must never break normal behaviour
+            pass
+
+    except Exception as e:
+        # Metrics for failed LLM call
+        end_time = time.time()
+        try:
+            log_llm_call(
+                run_id=run_id,
+                phase="retrospective",
+                agent="scrum_master",
+                provider=(provider or "unknown"),
+                model=used_model,
+                start_time=start_time,
+                end_time=end_time,
+                input_text=full_prompt,
+                output_text=f"ERROR: {e}",
+                story_id=artefact_id if kind == "story" else None,
+                metadata={
+                    "kind": kind,
+                    "artefact_id": artefact_id,
+                    "error": str(e),
+                },
+            )
+        except Exception:
+            pass
+        # Preserve the original behaviour (propagate error)
+        raise
 
     # Persist to DB on caller
-    return ai_text, getattr(llm, "model_name", getattr(llm, "model", "unknown"))
-
+    return ai_text, used_model

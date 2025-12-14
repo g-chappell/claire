@@ -5,7 +5,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from pathlib import Path
-import os, json, subprocess, traceback, tempfile, asyncio
+import os, json, subprocess, traceback, tempfile, asyncio, time
 from langchain_core.messages import HumanMessage
 
 from app.storage.db import get_db
@@ -23,6 +23,7 @@ from app.configs.settings import get_settings
 from app.agents.coding.coding_agent import CodingAgent
 from app.agents.coding.serena_tools import get_serena_tools, close_serena
 from app.core.planner import _topo_order
+from app.core.metrics import log_llm_call
 
 router = APIRouter(prefix="/code", tags=["coding"])
 
@@ -265,6 +266,8 @@ async def implement_story(run_id: str, story_id: str, request: Request, db: Sess
             story_title=story.title or "",
             story_desc=desc,
             story_tasks=task_titles,
+            run_id=run_id,
+            story_id=str(getattr(story, "id", story_id)),
         )
         from collections.abc import Mapping as _Mapping
 
@@ -335,6 +338,10 @@ async def implement_story_stream(
     cfg = {"recursion_limit": int(getattr(settings, "CODING_RECURSION_LIMIT", 30))}
 
     async def gen():
+        # Metrics: start wall-clock timer and buffer for streamed output text
+        start_time = time.time()
+        output_chunks: List[str] = []
+
         # Prologue
         yield _sse({
             "type": "stream:start",
@@ -350,25 +357,52 @@ async def implement_story_stream(
         })
 
         # Build the exact prompt shape that CodingAgent.implement_story uses
+        tasks_json = json.dumps(story_tasks, indent=2, ensure_ascii=False)
+        prompt = (
+            f"Product Vision (summary): {pvs}\n"
+            f"Technical Solution (stack/modules): {tss}\n"
+            f"Epic: {epic_title}\n"
+            f"Story: {story.title or ''} — {story_desc}\n"
+            f"Story Tasks (with dependencies and priority):\n{tasks_json}\n\n"
+            "Implement ALL of these tasks for this story in the fewest possible steps using Serena tools.\n"
+            "Respect depends_on and priority_rank when choosing the order of implementation.\n"
+            "Do NOT implement tasks from other stories or epics."
+        )
+        state = {"messages": [HumanMessage(content=prompt)]}
+
         try:
             runnable = await agent._agent_for(request, project_dir=project_dir)
 
-            tasks_json = json.dumps(story_tasks, indent=2, ensure_ascii=False)
-            prompt = (
-                f"Product Vision (summary): {pvs}\n"
-                f"Technical Solution (stack/modules): {tss}\n"
-                f"Epic: {epic_title}\n"
-                f"Story: {story.title or ''} — {story_desc}\n"
-                f"Story Tasks (with dependencies and priority):\n{tasks_json}\n\n"
-                "Implement ALL of these tasks for this story in the fewest possible steps using Serena tools.\n"
-                "Respect depends_on and priority_rank when choosing the order of implementation.\n"
-                "Do NOT implement tasks from other stories or epics."
-            )
-
-            state = {"messages": [HumanMessage(content=prompt)]}
-
             # Stream raw Serena events, tagged with story_id
             async for ev in runnable.astream_events(cast(Any, state), config=cfg):
+                # --- METRICS: best-effort reconstruction of streamed output text ---
+                try:
+                    if isinstance(ev, dict):
+                        data = ev.get("data") or {}
+                        chunk = None
+                        if isinstance(data, dict):
+                            # Common LC patterns: chunk/output with content/text
+                            chunk = data.get("chunk") or data.get("output") or None
+                            part = ""
+                            if isinstance(chunk, dict):
+                                part = (
+                                    chunk.get("content")
+                                    or chunk.get("text")
+                                    or ""
+                                )
+                            elif isinstance(chunk, str):
+                                part = chunk
+
+                            # fallback: content at top-level of data
+                            if not part:
+                                part = data.get("content") or ""
+
+                            if part:
+                                output_chunks.append(str(part))
+                except Exception:
+                    # Never let metrics logic break the stream
+                    pass
+
                 if isinstance(ev, dict):
                     payload = {
                         "type": "event",
@@ -388,7 +422,30 @@ async def implement_story_stream(
 
                 yield _sse(payload)
 
-            # Normal completion
+            # Normal completion: log one LLM-call metric for this streamed story
+            end_time = time.time()
+            try:
+                output_text = "".join(output_chunks)
+            except Exception:
+                output_text = ""
+
+            try:
+                log_llm_call(
+                    run_id=str(run_id),
+                    phase="coding",
+                    agent="coding_agent",
+                    provider=getattr(agent, "provider", "unknown"),
+                    model=getattr(agent, "model_name", "unknown"),
+                    start_time=start_time,
+                    end_time=end_time,
+                    input_text=prompt,
+                    output_text=output_text,
+                    story_id=str(story_id),
+                )
+            except Exception:
+                # Metrics must never interfere with normal behaviour
+                pass
+
             yield _sse({
                 "type": "story:done",
                 "event": "story_end",
@@ -398,7 +455,24 @@ async def implement_story_stream(
             })
 
         except Exception as e:
-            # Error during story execution
+            # Error during story execution – still log an LLM call with error text
+            end_time = time.time()
+            try:
+                log_llm_call(
+                    run_id=str(run_id),
+                    phase="coding",
+                    agent="coding_agent",
+                    provider=getattr(agent, "provider", "unknown"),
+                    model=getattr(agent, "model_name", "unknown"),
+                    start_time=start_time,
+                    end_time=end_time,
+                    input_text=prompt,
+                    output_text=f"ERROR: {e}",
+                    story_id=str(story_id),
+                )
+            except Exception:
+                pass
+
             yield _sse({
                 "type": "story:error",
                 "run_id": str(run_id),
@@ -538,6 +612,8 @@ async def execute_plan(
                     story_title=s.title or "",
                     story_desc=desc,
                     story_tasks=task_titles,
+                    run_id=run_id,
+                    story_id=str(getattr(s, "id", "")),
                 )
 
                 from collections.abc import Mapping as _Mapping
