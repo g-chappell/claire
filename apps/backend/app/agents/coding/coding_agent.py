@@ -9,11 +9,13 @@ from langchain_core.tools import BaseTool
 from langchain_core.language_models.chat_models import BaseChatModel
 from app.configs.settings import get_settings
 from app.agents.coding.serena_tools import get_serena_tools, close_serena
-from app.agents.lc.model_factory import make_chat_model  # your existing factory
+from app.agents.lc.model_factory import make_chat_model
+from app.core.metrics import log_llm_call 
 
 from collections import deque
 import json
 import asyncio
+import time  
 
 @runtime_checkable
 class _SupportsAStreamEvents(Protocol):
@@ -115,6 +117,14 @@ class CodingAgent:
     ):
         # keep a handle to settings for later (recursion_limit, etc.)
         self.settings = get_settings()
+
+        # Snapshot provider/model for metrics
+        raw_provider = provider or getattr(self.settings, "LLM_PROVIDER", None) or ""
+        self.provider: str = raw_provider.strip().lower() or "unknown"
+
+        raw_model = model or getattr(self.settings, "LLM_MODEL", None) or ""
+        self.model_name: str = raw_model.strip() or "unknown"
+
         # use your factory, which already returns a BaseChatModel with retries/timeouts set
         self.llm: BaseChatModel = make_chat_model(
             model=model,
@@ -179,6 +189,8 @@ class CodingAgent:
         story_title: str,
         story_desc: str,
         story_tasks: List[str],
+        run_id: Optional[str] = None,
+        story_id: Optional[str] = None,
     ) -> dict:
         """
         Execute the FEWEST Serena steps to complete ALL tasks for a single story
@@ -208,6 +220,12 @@ class CodingAgent:
 
         # Bound tool/LLM recursion (iterations)
         cfg = {"recursion_limit": int(getattr(self.settings, "CODING_RECURSION_LIMIT", 30))}
+
+        # Metrics: one LLM call per story-level coding run
+        start_time = time.time()
+        phase = "coding"
+        effective_run_id = run_id or "unknown"
+        effective_story_id = story_id
 
         events: List[Dict[str, Any]] = []
 
@@ -253,8 +271,21 @@ class CodingAgent:
                     )
                     await _sleep_backoff(attempt, retry_base)
 
-            # If we aborted mid-stream, return early with a clear message
+            # If we aborted mid-stream, log metrics and return early with a clear message
             if aborted_reason:
+                end_time = time.time()
+                log_llm_call(
+                    run_id=effective_run_id,
+                    phase=phase,
+                    agent="coding_agent",
+                    provider=self.provider,
+                    model=self.model_name,
+                    start_time=start_time,
+                    end_time=end_time,
+                    input_text=prompt,
+                    output_text=aborted_reason,
+                    story_id=effective_story_id,
+                )
                 return {"output": aborted_reason, "events": events}
 
             # --- Final LLM call retries (for last response assembly) ---
@@ -285,6 +316,21 @@ class CodingAgent:
             if not output_text:
                 output_text = str(final)
 
+            # Metrics: successful coding run for this story
+            end_time = time.time()
+            log_llm_call(
+                run_id=effective_run_id,
+                phase=phase,
+                agent="coding_agent",
+                provider=self.provider,
+                model=self.model_name,
+                start_time=start_time,
+                end_time=end_time,
+                input_text=prompt,
+                output_text=output_text,
+                story_id=effective_story_id,
+            )
+
             return {"output": output_text, "events": events}
         finally:
             await close_serena(request)
@@ -300,6 +346,8 @@ class CodingAgent:
         story_title: str,
         story_desc: str,
         task_title: str,
+        run_id: Optional[str] = None,
+        story_id: Optional[str] = None,
     ) -> dict:
         """
         Backwards-compatible wrapper that treats a single task as a one-task story.
@@ -317,6 +365,8 @@ class CodingAgent:
             story_title=story_title,
             story_desc=story_desc,
             story_tasks=story_tasks,
+            run_id=run_id,
+            story_id=story_id,
         )
 
 

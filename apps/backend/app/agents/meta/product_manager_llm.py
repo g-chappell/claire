@@ -44,6 +44,7 @@ from app.core.models import (
     Task,
     TechnicalSolution,
 )
+from app.core.metrics import log_llm_call
 
 import random
 import time
@@ -270,6 +271,10 @@ class ProductManagerLLM:
             provider=provider_name,  # <-- now honours per-run provider
         )
 
+        # Remember for metrics
+        self.provider_name = provider_name
+        self.model_name = model_name or ""
+
         logger.info(
             "PM_INIT provider=%s model=%s temp=%s",
             provider_name,
@@ -301,20 +306,39 @@ class ProductManagerLLM:
         """
         fctx = build_feedback_context_for_run(db, run_id=run_id)
 
-        # Vision
+        # ---------------- Vision (LLM call + metrics) ----------------
+        vision_payload = {
+            "req_id": requirement.get("id", ""),
+            "title": requirement.get("title", ""),
+            "description": requirement.get("description", ""),
+            "constraints": requirement.get("constraints", ""),
+            "nfr": requirement.get("nfr", ""),
+            "feedback_context": fctx,
+        }
+        v_start = time.perf_counter()
         v_draft: ProductVisionDraft = _invoke_typed(
             ProductVisionDraft,
             self.vision_chain,
-            {
-                "req_id": requirement.get("id", ""),
-                "title": requirement.get("title", ""),
-                "description": requirement.get("description", ""),
-                "constraints": requirement.get("constraints", ""),
-                "nfr": requirement.get("nfr", ""),
-                "feedback_context": fctx,
-            },
+            vision_payload,
             config=config,
         )
+        v_end = time.perf_counter()
+
+        try:
+            log_llm_call(
+                run_id=run_id,
+                phase="planning",
+                agent="vision",
+                provider=self.provider_name,
+                model=self.model_name,
+                start_time=v_start,
+                end_time=v_end,
+                input_text=str(vision_payload),
+                output_text=v_draft.model_dump_json(),
+            )
+        except Exception:
+            logger.exception("METRICS: failed to log vision LLM call")
+
         vision = ProductVision(
             id=_gen_id("PV", requirement.get("id", "")),
             personas=_sequence_to_list(getattr(v_draft, "personas", None)),
@@ -322,19 +346,38 @@ class ProductManagerLLM:
             goals=_sequence_to_list(getattr(v_draft, "goals", None)),
         )
 
-        # Architecture
+        # ---------------- Architecture (LLM call + metrics) ----------------
+        arch_payload = {
+            "title": requirement.get("title", ""),
+            "features": ", ".join(vision.features),
+            "constraints": requirement.get("constraints", ""),
+            "nfr": requirement.get("nfr", ""),
+            "feedback_context": fctx,
+        }
+        a_start = time.perf_counter()
         a_draft: TechnicalSolutionDraft = _invoke_typed(
             TechnicalSolutionDraft,
             self.arch_chain,
-            {
-                "title": requirement.get("title", ""),
-                "features": ", ".join(vision.features),
-                "constraints": requirement.get("constraints", ""),
-                "nfr": requirement.get("nfr", ""),
-                "feedback_context": fctx,
-            },
+            arch_payload,
             config=config,
         )
+        a_end = time.perf_counter()
+
+        try:
+            log_llm_call(
+                run_id=run_id,
+                phase="planning",
+                agent="architect",
+                provider=self.provider_name,
+                model=self.model_name,
+                start_time=a_start,
+                end_time=a_end,
+                input_text=str(arch_payload),
+                output_text=a_draft.model_dump_json(),
+            )
+        except Exception:
+            logger.exception("METRICS: failed to log architecture LLM call")
+
         solution = TechnicalSolution(
             id=_gen_id("TS", requirement.get("id", "")),
             stack=_sequence_to_list(a_draft.stack),
@@ -420,12 +463,29 @@ class ProductManagerLLM:
             # structured + features_only both use the full/best RA prompt
             ra_chain = self.ra_chain
 
+        ra_start = time.perf_counter()
         ra_draft: RAPlanDraft = _invoke_typed(
             RAPlanDraft,
             ra_chain,
             ra_inputs,
             config=config,
         )
+        ra_end = time.perf_counter()
+
+        try:
+            log_llm_call(
+                run_id=run_id,
+                phase="planning",
+                agent="requirements_analyst",
+                provider=self.provider_name,
+                model=self.model_name,
+                start_time=ra_start,
+                end_time=ra_end,
+                input_text=str(ra_inputs),
+                output_text=ra_draft.model_dump_json(),
+            )
+        except Exception:
+            logger.exception("METRICS: failed to log RA LLM call")
 
         logger.info(
             "PM_RA_OUTPUT run=%s mode=%s epics=%d stories=%d",
@@ -587,7 +647,30 @@ class ProductManagerLLM:
                     "feedback_context": fctx_story,   # <-- story-specific
                 })
             try:
-                qa_results_any = self.qa_chain.batch(qa_inputs, config=config, max_concurrency=4) or [None] * len(stories)
+                qa_start = time.perf_counter()
+                qa_results_any = self.qa_chain.batch(
+                    qa_inputs,
+                    config=config,
+                    max_concurrency=4,
+                ) or [None] * len(stories)
+                qa_end = time.perf_counter()
+
+                try:
+                    # Treat the batch as a single "QA planner" call for metrics
+                    log_llm_call(
+                        run_id=run_id,
+                        phase="planning",
+                        agent="qa_planner",
+                        provider=self.provider_name,
+                        model=self.model_name,
+                        start_time=qa_start,
+                        end_time=qa_end,
+                        input_text=str(qa_inputs),
+                        output_text=str(qa_results_any),
+                    )
+                except Exception:
+                    logger.exception("METRICS: failed to log QA LLM batch call")
+
                 qa_results: List[Optional[QASpec]] = cast(List[Optional[QASpec]], qa_results_any)
             except Exception as e:
                 solution.decisions = (solution.decisions or []) + [f"QA parse failed ({type(e).__name__}); continuing."]
@@ -607,21 +690,39 @@ class ProductManagerLLM:
         design_notes: List[DesignNote] = []
 
         if settings.FEATURE_DESIGN_NOTES and self.tw_notes_chain is not None:
+            notes_payload = {
+                "features": ", ".join(vision.features),
+                "stack": ", ".join(solution.stack or []),
+                "modules": ", ".join(solution.modules or []),
+                "interfaces": ", ".join(f"{k}:{v}" for k, v in (solution.interfaces or {}).items()),
+                "decisions": ", ".join(solution.decisions or []),
+                "epic_titles": ", ".join(e.title for e in epics[:6]),
+                "story_titles": ", ".join(s.title for s in stories[:12]),
+                "feedback_context": fctx_global,
+            }
+            notes_start = time.perf_counter()
             notes_bundle: TechWritingBundleDraft = _invoke_typed(
                 TechWritingBundleDraft,
                 self.tw_notes_chain,
-                {
-                    "features": ", ".join(vision.features),
-                    "stack": ", ".join(solution.stack or []),
-                    "modules": ", ".join(solution.modules or []),
-                    "interfaces": ", ".join(f"{k}:{v}" for k, v in (solution.interfaces or {}).items()),
-                    "decisions": ", ".join(solution.decisions or []),
-                    "epic_titles": ", ".join(e.title for e in epics[:6]),
-                    "story_titles": ", ".join(s.title for s in stories[:12]),
-                    "feedback_context": fctx_global,
-                },
+                notes_payload,
                 config=config,
             )
+            notes_end = time.perf_counter()
+
+            try:
+                log_llm_call(
+                    run_id=run_id,
+                    phase="planning",
+                    agent="tech_writer_notes",
+                    provider=self.provider_name,
+                    model=self.model_name,
+                    start_time=notes_start,
+                    end_time=notes_end,
+                    input_text=str(notes_payload),
+                    output_text=notes_bundle.model_dump_json(),
+                )
+            except Exception:
+                logger.exception("METRICS: failed to log tech-writer notes LLM call")
 
             notes_any: Any = getattr(notes_bundle, "notes", []) or []
 
@@ -654,10 +755,13 @@ class ProductManagerLLM:
         # ---------- Tech Writer: Tasks per story (batch over stories) ----------
         epic_title_by_id = {e.id: e.title for e in epics}
         task_inputs: List[Dict[str, str]] = []
+        task_story_ids: List[str] = []
 
         for s in stories:
             epic_title = epic_title_by_id.get(s.epic_id, "")
-            fctx_story = build_feedback_context_for_run(db, run_id=run_id, epic_title=epic_title, story_title=s.title)
+            fctx_story = build_feedback_context_for_run(
+                db, run_id=run_id, epic_title=epic_title, story_title=s.title
+            )
             payload: Dict[str, str] = {
                 "story_title": s.title,
                 "story_description": s.description,
@@ -666,13 +770,39 @@ class ProductManagerLLM:
                 "feedback_context": fctx_story,   # <-- story-specific
             }
             if settings.FEATURE_QA:
-                gherkin_block = "\n".join([ac.gherkin for ac in (s.acceptance or []) if getattr(ac, "gherkin", "")])
+                gherkin_block = "\n".join(
+                    [ac.gherkin for ac in (s.acceptance or []) if getattr(ac, "gherkin", "")]
+                )
                 payload["gherkin"] = gherkin_block
             task_inputs.append(payload)
+            task_story_ids.append(s.id)
 
-        # One call per story, with resilient invoke
-        task_drafts_any = [_try_invoke(self.tw_tasks_chain, inp, config=config) for inp in task_inputs]
-        task_drafts: List[TaskDraft] = cast(List[TaskDraft], task_drafts_any)
+        # One call per story, with resilient invoke + metrics per call
+        task_drafts: List[TaskDraft] = []
+        for inp, story_id in zip(task_inputs, task_story_ids):
+            t_start = time.perf_counter()
+            td_any = _try_invoke(self.tw_tasks_chain, inp, config=config)
+            t_end = time.perf_counter()
+
+            # _try_invoke should already return a TaskDraft (via structured output)
+            td = cast(TaskDraft, td_any)
+            task_drafts.append(td)
+
+            try:
+                log_llm_call(
+                    run_id=run_id,
+                    phase="planning",
+                    agent="tech_writer_tasks",
+                    provider=self.provider_name,
+                    model=self.model_name,
+                    start_time=t_start,
+                    end_time=t_end,
+                    input_text=str(inp),
+                    output_text=td.model_dump_json(),
+                    story_id=story_id,
+                )
+            except Exception:
+                logger.exception("METRICS: failed to log tech-writer tasks LLM call")
 
         tasks_by_story: Dict[str, List[Task]] = {s.id: [] for s in stories}
         for td in task_drafts:
