@@ -256,6 +256,14 @@ async def implement_story(run_id: str, story_id: str, request: Request, db: Sess
         title = getattr(t, "title", None) or f"Task {getattr(t, 'id', '')}"
         task_titles.append(title)
 
+    # Set metrics context so Serena tool calls can record story_id
+    request.state._metrics_ctx = {
+        "run_id": str(run_id),
+        "phase": "coding",
+        "agent": "coding_agent",
+        "story_id": str(getattr(story, "id", story_id)),
+    }
+
     try:
         out = await agent.implement_story(
             request=request,
@@ -325,6 +333,14 @@ async def implement_story_stream(
     epic_title = _epic_title(db, story.epic_id)
     acc = _acceptance_text(db, run_id, story_id)
     story_desc = acc or _as_text(story.description)
+
+    # Set metrics context so Serena tool calls can record story_id
+    request.state._metrics_ctx = {
+        "run_id": str(run_id),
+        "phase": "coding",
+        "agent": "coding_agent",
+        "story_id": str(story_id),
+    }
 
     # Still load tasks from DB, but only to build the story_tasks list
     tasks = _tasks_for_story(db, run_id, story_id)
@@ -601,6 +617,14 @@ async def execute_plan(
                 getattr(t, "title", None) or f"Task {getattr(t, 'id', '')}"
                 for t in tasks
             ]
+
+            # Set metrics context for this story so Serena tool calls get story_id
+            request.state._metrics_ctx = {
+                "run_id": str(run_id),
+                "phase": "coding",
+                "agent": "coding_agent",
+                "story_id": str(getattr(s, "id", "")),
+            }
 
             try:
                 out = await agent.implement_story(

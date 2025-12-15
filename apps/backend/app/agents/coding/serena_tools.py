@@ -132,6 +132,12 @@ async def get_serena_tools(request: Request, project_dir: Optional[str] = None) 
             if allowed:
                 tools = [t for t in tools if getattr(t, "name", "") in allowed]
 
+            # Snapshot the original MCP tools by name so our wrappers always
+            # call the real underlying tool (and not other wrappers).
+            orig_by_name: Dict[str, BaseTool] = {
+                getattr(t, "name", ""): t for t in tools
+            }
+
             names = [getattr(t, "name", "") for t in tools]
             logger.info("Serena tools bound: %s", names)
 
@@ -177,15 +183,8 @@ async def get_serena_tools(request: Request, project_dir: Optional[str] = None) 
                         "relative_path": relative_path,
                         "content": (content if (content and content.strip()) else _stub_for(relative_path)),
                     }
-                    if hasattr(orig_create_tool, "ainvoke"):
-                        return await getattr(orig_create_tool, "ainvoke")(payload)  # type: ignore
-                    if hasattr(orig_create_tool, "arun"):
-                        return await getattr(orig_create_tool, "arun")(payload)  # type: ignore
-                    if hasattr(orig_create_tool, "invoke"):
-                        return getattr(orig_create_tool, "invoke")(payload)  # type: ignore
-                    if hasattr(orig_create_tool, "run"):
-                        return getattr(orig_create_tool, "run")(payload)  # type: ignore
-                    raise RuntimeError("create_text_file tool has no callable interface")
+                    # IMPORTANT: route through _call so we get metrics + backoff
+                    return await _call(orig_create_tool, payload)
 
                 def _create_text_file_safe_sync(relative_path: str, content: Optional[str] = None):
                     async def _runner():
@@ -209,7 +208,7 @@ async def get_serena_tools(request: Request, project_dir: Optional[str] = None) 
 
             # ---- Patch: normalize symbol tools + safe fallbacks ----------------
             def _get(name: str) -> Optional[BaseTool]:
-                return next((t for t in tools if getattr(t, "name", "") == name), None)
+                return orig_by_name.get(name)
 
             def _normalize_name_path(name_path: str) -> str:
                 # Accept dotted or slashed paths; normalize to slash
@@ -286,14 +285,22 @@ async def get_serena_tools(request: Request, project_dir: Optional[str] = None) 
                         if error is not None:
                             meta["error"] = str(error)
 
+                        # Pull metrics context from the request if present
+                        ctx = getattr(request.state, "_metrics_ctx", {}) or {}
+                        run_id_ctx = str(ctx.get("run_id") or run_id_for_metrics)
+                        phase_ctx = str(ctx.get("phase") or "coding")
+                        agent_ctx = str(ctx.get("agent") or "coding_agent")
+                        story_id_ctx = ctx.get("story_id")
+
                         log_tool_call(
-                            run_id=run_id_for_metrics,
-                            phase="coding",
-                            agent="coding_agent",
+                            run_id=run_id_ctx,
+                            phase=phase_ctx,
+                            agent=agent_ctx,
                             tool_type="serena",
                             tool_name=tool_name,
                             start_time=start_time,
                             end_time=end_time,
+                            story_id=str(story_id_ctx) if story_id_ctx is not None else None,
                             meta=meta,
                         )
                     except Exception:
@@ -656,6 +663,60 @@ async def get_serena_tools(request: Request, project_dir: Optional[str] = None) 
                 )
             # ---------------------------------------------------------------------------
 
+            # ---- Generic metrics wrapper for remaining tools -------------------------
+            from langchain_core.tools import BaseTool as _BaseTool
+
+            class _SerenaMetricsTool(_BaseTool):
+                """
+                Thin wrapper that forwards to the underlying MCP tool via _call(...)
+                so that every agent-visible Serena tool is metrics-instrumented.
+                """
+                underlying: _BaseTool
+
+                async def _arun(self, *args: Any, **kwargs: Any) -> Any:  # type: ignore[override]
+                    # LangChain normally passes kwargs; merge any dict positional arg just in case.
+                    payload: Dict[str, Any] = dict(kwargs)
+                    if args:
+                        if len(args) == 1 and isinstance(args[0], dict):
+                            payload.update(args[0])
+                        else:
+                            payload["_args"] = list(args)
+                    return await _call(self.underlying, payload)
+
+                def _run(self, *args: Any, **kwargs: Any) -> Any:  # type: ignore[override]
+                    async def _runner():
+                        return await self._arun(*args, **kwargs)
+                    return anyio.run(_runner)
+
+            # Tools that already have bespoke wrappers that call _call(...) internally
+            already_wrapped = {
+                "create_text_file",
+                "find_symbol",
+                "insert_after_symbol",
+                "insert_before_symbol",
+                "replace_symbol_body",
+                "rename_symbol",
+                "find_referencing_symbols",
+            }
+
+            wrapped_list: List[_BaseTool] = []
+            for t in tools:
+                name = getattr(t, "name", "")
+                if name in already_wrapped:
+                    # use our specialised StructuredTool wrappers as-is
+                    wrapped_list.append(t)
+                else:
+                    # wrap all other agent-visible tools so they call _call(...)
+                    wrapped_list.append(
+                        _SerenaMetricsTool(
+                            name=name,
+                            description=getattr(t, "description", "") or "",
+                            args_schema=getattr(t, "args_schema", None),
+                            underlying=orig_by_name.get(name, t),
+                        )
+                    )
+
+            tools = wrapped_list
 
 
             if tools:
