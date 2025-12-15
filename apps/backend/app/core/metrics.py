@@ -6,6 +6,7 @@ import os
 import json
 import time
 import logging
+from contextvars import ContextVar
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,7 @@ class LLMCallRecord:
     duration_s: float
     story_id: Optional[str] = None
     tool_name: Optional[str] = None
+    provider_request_id: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -77,10 +79,46 @@ _LLM_CALLS: List[LLMCallRecord] = []
 _TOOL_CALLS: List[ToolCallRecord] = []
 _LOCK = Lock()
 
-# Very rough per-1k token costs in USD – tweak as you like
-_COST_PER_1K_BY_PROVIDER: Dict[str, float] = {
-    "anthropic": 3.0,
-    "openai": 2.0,
+# --------------------------------------------------------------------
+# Async context for LLM calls (run_id / phase / agent / story_id)
+# --------------------------------------------------------------------
+
+_LLM_CONTEXT: ContextVar[Dict[str, Any]] = ContextVar("LLM_METRICS_CTX", default={})
+
+
+def set_llm_context(ctx: Optional[Dict[str, Any]]) -> None:
+    """
+    Set the current LLM metrics context (run_id, phase, agent, story_id, etc.).
+    Used by agents/endpoints; read by the LLM callback handler.
+    """
+    try:
+        _LLM_CONTEXT.set(dict(ctx or {}))
+    except Exception:
+        _LLM_CONTEXT.set({})
+
+
+def get_llm_context() -> Dict[str, Any]:
+    """
+    Return the current LLM metrics context, or {} if unset.
+    """
+    try:
+        return _LLM_CONTEXT.get({})
+    except LookupError:
+        return {}
+
+# Per-million token prices (USD). Adjust here if pricing changes.
+# These are *approximate* and used purely for experiment reporting.
+_COST_RATES_BY_PROVIDER: Dict[str, Dict[str, float]] = {
+    # Anthropic Claude Sonnet 4.5
+    "anthropic": {
+        "input_per_million": 3.0,
+        "output_per_million": 15.0,
+    },
+    # OpenAI GPT-5.1
+    "openai": {
+        "input_per_million": 1.25,
+        "output_per_million": 10.0,
+    },
 }
 
 
@@ -98,9 +136,18 @@ def _estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4)
 
 
-def _estimate_cost(provider: str, total_tokens: int) -> float:
-    rate = _COST_PER_1K_BY_PROVIDER.get(provider.lower(), 2.0)
-    return (total_tokens / 1000.0) * rate
+def _estimate_cost(provider: str, input_tokens: int, output_tokens: int) -> float:
+    """
+    Estimate cost using provider-specific per-million pricing and separate
+    input/output token rates.
+    """
+    cfg = _COST_RATES_BY_PROVIDER.get(provider.lower(), {})
+    in_rate = float(cfg.get("input_per_million", 0.0))
+    out_rate = float(cfg.get("output_per_million", 0.0))
+
+    cost_in = (input_tokens / 1_000_000.0) * in_rate
+    cost_out = (output_tokens / 1_000_000.0) * out_rate
+    return cost_in + cost_out
 
 
 # --------------------------------------------------------------------
@@ -123,13 +170,14 @@ def log_llm_call(
     story_id: Optional[str] = None,
     tool_name: Optional[str] = None,
     metadata: Optional[Dict[str, Any]] = None,
+    provider_request_id: Optional[str] = None,
 ) -> None:
     """
     Log a single LLM call at call-level granularity.
 
-    Either pass explicit token counts OR rely on the (rough) estimates from
-    input_text/output_text. This is per-call; you can aggregate by run/phase
-    offline for the dissertation tables.
+    Prefer passing explicit token counts from usage_metadata.
+    If they are missing, fall back to crude estimates from text length
+    so older models still get *some* accounting.
     """
     try:
         if input_tokens is None:
@@ -140,7 +188,7 @@ def log_llm_call(
         input_tokens = int(input_tokens)
         output_tokens = int(output_tokens)
         total_tokens = input_tokens + output_tokens
-        cost = _estimate_cost(provider, total_tokens)
+        cost = _estimate_cost(provider, input_tokens, output_tokens)
 
         rec = LLMCallRecord(
             ts=time.time(),
@@ -156,6 +204,7 @@ def log_llm_call(
             duration_s=max(0.0, end_time - start_time),
             story_id=story_id,
             tool_name=tool_name,
+            provider_request_id=provider_request_id,
             metadata=metadata or {},
         )
 

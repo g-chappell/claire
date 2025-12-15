@@ -10,12 +10,11 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from app.configs.settings import get_settings
 from app.agents.coding.serena_tools import get_serena_tools, close_serena
 from app.agents.lc.model_factory import make_chat_model
-from app.core.metrics import log_llm_call 
+from app.core.metrics import set_llm_context
 
 from collections import deque
 import json
 import asyncio
-import time  
 
 @runtime_checkable
 class _SupportsAStreamEvents(Protocol):
@@ -221,11 +220,19 @@ class CodingAgent:
         # Bound tool/LLM recursion (iterations)
         cfg = {"recursion_limit": int(getattr(self.settings, "CODING_RECURSION_LIMIT", 30))}
 
-        # Metrics: one LLM call per story-level coding run
-        start_time = time.time()
         phase = "coding"
         effective_run_id = run_id or "unknown"
         effective_story_id = story_id
+
+        # LLM metrics context: used by MetricsLLMHandler for all underlying API calls
+        set_llm_context(
+            {
+                "run_id": effective_run_id,
+                "phase": phase,
+                "agent": "coding_agent",
+                "story_id": effective_story_id,
+            }
+        )
 
         events: List[Dict[str, Any]] = []
 
@@ -271,21 +278,9 @@ class CodingAgent:
                     )
                     await _sleep_backoff(attempt, retry_base)
 
-            # If we aborted mid-stream, log metrics and return early with a clear message
+            # If we aborted mid-stream, return early; individual LLM calls
+            # have already been logged via the metrics callback.
             if aborted_reason:
-                end_time = time.time()
-                log_llm_call(
-                    run_id=effective_run_id,
-                    phase=phase,
-                    agent="coding_agent",
-                    provider=self.provider,
-                    model=self.model_name,
-                    start_time=start_time,
-                    end_time=end_time,
-                    input_text=prompt,
-                    output_text=aborted_reason,
-                    story_id=effective_story_id,
-                )
                 return {"output": aborted_reason, "events": events}
 
             # --- Final LLM call retries (for last response assembly) ---
@@ -316,23 +311,10 @@ class CodingAgent:
             if not output_text:
                 output_text = str(final)
 
-            # Metrics: successful coding run for this story
-            end_time = time.time()
-            log_llm_call(
-                run_id=effective_run_id,
-                phase=phase,
-                agent="coding_agent",
-                provider=self.provider,
-                model=self.model_name,
-                start_time=start_time,
-                end_time=end_time,
-                input_text=prompt,
-                output_text=output_text,
-                story_id=effective_story_id,
-            )
-
             return {"output": output_text, "events": events}
         finally:
+            # Clear LLM metrics context and close Serena
+            set_llm_context({})
             await close_serena(request)
 
     async def implement_task(

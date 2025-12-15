@@ -5,7 +5,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from pathlib import Path
-import os, json, subprocess, traceback, tempfile, asyncio, time
+import os, json, subprocess, traceback, tempfile, asyncio
 from langchain_core.messages import HumanMessage
 
 from app.storage.db import get_db
@@ -23,7 +23,7 @@ from app.configs.settings import get_settings
 from app.agents.coding.coding_agent import CodingAgent
 from app.agents.coding.serena_tools import get_serena_tools, close_serena
 from app.core.planner import _topo_order
-from app.core.metrics import log_llm_call
+from app.core.metrics import set_llm_context
 
 router = APIRouter(prefix="/code", tags=["coding"])
 
@@ -354,9 +354,15 @@ async def implement_story_stream(
     cfg = {"recursion_limit": int(getattr(settings, "CODING_RECURSION_LIMIT", 30))}
 
     async def gen():
-        # Metrics: start wall-clock timer and buffer for streamed output text
-        start_time = time.time()
-        output_chunks: List[str] = []
+        # LLM metrics context for all API calls during this stream
+        set_llm_context(
+            {
+                "run_id": str(run_id),
+                "phase": "coding",
+                "agent": "coding_agent",
+                "story_id": str(story_id),
+            }
+        )
 
         # Prologue
         yield _sse({
@@ -391,33 +397,7 @@ async def implement_story_stream(
 
             # Stream raw Serena events, tagged with story_id
             async for ev in runnable.astream_events(cast(Any, state), config=cfg):
-                # --- METRICS: best-effort reconstruction of streamed output text ---
-                try:
-                    if isinstance(ev, dict):
-                        data = ev.get("data") or {}
-                        chunk = None
-                        if isinstance(data, dict):
-                            # Common LC patterns: chunk/output with content/text
-                            chunk = data.get("chunk") or data.get("output") or None
-                            part = ""
-                            if isinstance(chunk, dict):
-                                part = (
-                                    chunk.get("content")
-                                    or chunk.get("text")
-                                    or ""
-                                )
-                            elif isinstance(chunk, str):
-                                part = chunk
 
-                            # fallback: content at top-level of data
-                            if not part:
-                                part = data.get("content") or ""
-
-                            if part:
-                                output_chunks.append(str(part))
-                except Exception:
-                    # Never let metrics logic break the stream
-                    pass
 
                 if isinstance(ev, dict):
                     payload = {
@@ -438,30 +418,6 @@ async def implement_story_stream(
 
                 yield _sse(payload)
 
-            # Normal completion: log one LLM-call metric for this streamed story
-            end_time = time.time()
-            try:
-                output_text = "".join(output_chunks)
-            except Exception:
-                output_text = ""
-
-            try:
-                log_llm_call(
-                    run_id=str(run_id),
-                    phase="coding",
-                    agent="coding_agent",
-                    provider=getattr(agent, "provider", "unknown"),
-                    model=getattr(agent, "model_name", "unknown"),
-                    start_time=start_time,
-                    end_time=end_time,
-                    input_text=prompt,
-                    output_text=output_text,
-                    story_id=str(story_id),
-                )
-            except Exception:
-                # Metrics must never interfere with normal behaviour
-                pass
-
             yield _sse({
                 "type": "story:done",
                 "event": "story_end",
@@ -471,24 +427,6 @@ async def implement_story_stream(
             })
 
         except Exception as e:
-            # Error during story execution – still log an LLM call with error text
-            end_time = time.time()
-            try:
-                log_llm_call(
-                    run_id=str(run_id),
-                    phase="coding",
-                    agent="coding_agent",
-                    provider=getattr(agent, "provider", "unknown"),
-                    model=getattr(agent, "model_name", "unknown"),
-                    start_time=start_time,
-                    end_time=end_time,
-                    input_text=prompt,
-                    output_text=f"ERROR: {e}",
-                    story_id=str(story_id),
-                )
-            except Exception:
-                pass
-
             yield _sse({
                 "type": "story:error",
                 "run_id": str(run_id),
@@ -502,7 +440,8 @@ async def implement_story_stream(
             except Exception:
                 pass
 
-            # Epilogue
+            # Clear LLM context and epilogue
+            set_llm_context({})
             yield _sse({"type": "stream:done", "run_id": str(run_id), "story_id": story_id})
 
     headers = {
