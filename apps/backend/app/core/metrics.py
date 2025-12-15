@@ -66,9 +66,10 @@ class ToolCallRecord:
     run_id: str
     phase: str              # "planning", "coding", etc.
     agent: str              # which agent invoked the tool
-    tool_type: str          # e.g. "rag", "fs", "shell"
-    tool_name: str          # e.g. "rag.search", "serena.exec"
+    tool_type: str          # e.g. "rag", "fs", "serena"
+    tool_name: str          # e.g. "rag.search", "find_symbol"
     duration_s: float
+    story_id: Optional[str] = None
     meta: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -179,6 +180,7 @@ def log_tool_call(
     tool_name: str,
     start_time: float,
     end_time: float,
+    story_id: Optional[str] = None,
     meta: Optional[Dict[str, Any]] = None,
 ) -> None:
     """
@@ -193,6 +195,7 @@ def log_tool_call(
             tool_type=tool_type,
             tool_name=tool_name,
             duration_s=max(0.0, end_time - start_time),
+            story_id=story_id,
             meta=meta or {},
         )
         with _LOCK:
