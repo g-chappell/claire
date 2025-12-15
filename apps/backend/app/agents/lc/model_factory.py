@@ -3,12 +3,14 @@ from __future__ import annotations
 import os
 import time
 import threading
-from typing import Any, Optional, cast
+from typing import Any, Optional, cast, Dict
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.callbacks.base import BaseCallbackHandler
 
 import logging
 logger = logging.getLogger(__name__)
+
+from app.core.metrics import log_llm_call, get_llm_context
 
 # --- Claude Models for reference --- 
 # haiku fastest/cheapest, sonnet for coding/more expensive, opus most expensive dont use
@@ -53,6 +55,123 @@ class GlobalLLMDelayHandler(BaseCallbackHandler):
                 time.sleep(wait)
             _LAST_LLM_CALL = time.monotonic()
 
+class MetricsLLMHandler(BaseCallbackHandler):
+    """
+    Callback that logs *per-API-call* usage using provider usage_metadata.
+    Context (run_id/phase/agent/story_id) is taken from app.core.metrics.get_llm_context().
+    """
+
+    def __init__(self, provider: str, model_name: str) -> None:
+        self.provider = provider
+        self.model_name = model_name
+        # Map of internal LC run_id -> start_time
+        self._starts: dict[str, float] = {}
+
+    def on_llm_start(self, serialized, prompts, **kwargs) -> None:
+        run_id = str(kwargs.get("run_id") or "")
+        self._starts[run_id] = time.time()
+
+    def on_llm_end(self, response, **kwargs) -> None:
+        try:
+            run_id_internal = str(kwargs.get("run_id") or "")
+            start_time = self._starts.pop(run_id_internal, time.time())
+            end_time = time.time()
+
+            # --- Extract usage from response ---
+            usage = getattr(response, "usage_metadata", None) or {}
+            if not isinstance(usage, dict):
+                usage = {}
+
+            # Fallback: some providers put this in llm_output.token_usage / usage
+            if (not usage) and hasattr(response, "llm_output"):
+                llm_output = getattr(response, "llm_output") or {}
+                if isinstance(llm_output, dict):
+                    token_usage = (
+                        llm_output.get("token_usage")
+                        or llm_output.get("usage")
+                        or {}
+                    )
+                    if isinstance(token_usage, dict):
+                        usage = token_usage
+
+            input_tokens = int(usage.get("input_tokens") or usage.get("input") or 0)
+            output_tokens = int(usage.get("output_tokens") or usage.get("output") or 0)
+
+            # If the provider did not give any usage numbers, skip logging
+            if input_tokens == 0 and output_tokens == 0:
+                return
+
+            # --- Extract provider request_id for console correlation ---
+            request_id: Optional[str] = None
+
+            # 1) Direct attributes on the response object
+            for attr in ("request_id", "id"):
+                if hasattr(response, attr):
+                    val = getattr(response, attr)
+                    if isinstance(val, str) and val:
+                        request_id = val
+                        break
+
+            # 2) response_metadata (Anthropic / OpenAI / others)
+            if request_id is None and hasattr(response, "response_metadata"):
+                meta = getattr(response, "response_metadata") or {}
+                if isinstance(meta, dict):
+                    request_id = (
+                        meta.get("request_id")
+                        or meta.get("id")
+                        or meta.get("anthropic_request_id")
+                    )
+
+            # 3) llm_output (LangChain ChatResult sometimes stashes it here)
+            if request_id is None and hasattr(response, "llm_output"):
+                lo = getattr(response, "llm_output") or {}
+                if isinstance(lo, dict):
+                    request_id = (
+                        lo.get("request_id")
+                        or lo.get("id")
+                        or lo.get("anthropic_request_id")
+                    )
+                    if request_id is None:
+                        rm = lo.get("response_metadata") or {}
+                        if isinstance(rm, dict):
+                            request_id = (
+                                rm.get("request_id")
+                                or rm.get("id")
+                                or rm.get("anthropic_request_id")
+                            )
+
+            # --- Pull context from ContextVar ---
+            ctx = get_llm_context() or {}
+            run_id = str(ctx.get("run_id") or "unknown")
+            phase = str(ctx.get("phase") or "unknown")
+            agent = str(ctx.get("agent") or "unknown")
+            story_id = ctx.get("story_id")
+            tool_name = ctx.get("tool_name")
+
+            # Build metadata payload
+            meta_payload: Dict[str, Any] = {"usage_raw": usage}
+            if request_id:
+                meta_payload["provider_request_id"] = request_id
+
+            log_llm_call(
+                run_id=run_id,
+                phase=phase,
+                agent=agent,
+                provider=self.provider,
+                model=self.model_name,
+                start_time=start_time,
+                end_time=end_time,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                story_id=str(story_id) if story_id is not None else None,
+                tool_name=tool_name,
+                metadata=meta_payload,
+                provider_request_id=request_id,   # <--- NEW
+            )
+        except Exception:
+            # Never let metrics kill normal flow
+            logger.exception("METRICS: failed to log LLM usage from callback")
+
 def make_chat_model(
     model: Optional[str] = None,
     temperature: Optional[float] = None,
@@ -86,7 +205,13 @@ def make_chat_model(
 
     # Global inter-call delay (0 = disabled)
     delay_seconds = float(os.getenv("LLM_CALL_DELAY_SECONDS", "0"))
-    _callbacks = [GlobalLLMDelayHandler(delay_seconds)] if delay_seconds > 0 else None
+    callbacks: list[BaseCallbackHandler] = []
+    if delay_seconds > 0:
+        callbacks.append(GlobalLLMDelayHandler(delay_seconds))
+
+    # Per-call usage metrics handler
+    callbacks.append(MetricsLLMHandler(provider=provider, model_name=chosen))
+    cb_kwargs: dict[str, Any] = {"callbacks": callbacks}
 
     logger.info(
         "LLM_FACTORY provider=%s model=%s env_model=%s temperature=%s max_retries=%s timeout=%s delay=%s",
@@ -111,7 +236,7 @@ def make_chat_model(
                     temperature=temperature,
                     max_retries=max_retries,
                     timeout=timeout,
-                    **({ "callbacks": _callbacks } if _callbacks else {}),
+                    **cb_kwargs,
                 ),
             )
         except TypeError:
@@ -122,7 +247,7 @@ def make_chat_model(
                     temperature=temperature,
                     max_retries=max_retries,
                     timeout=timeout,
-                    **({ "callbacks": _callbacks } if _callbacks else {}),
+                    **cb_kwargs,
                 ),
             )
 
@@ -137,7 +262,7 @@ def make_chat_model(
                 temperature=temperature,
                 max_retries=max_retries,
                 timeout=timeout,
-                **({ "callbacks": _callbacks } if _callbacks else {}),
+                **cb_kwargs,
             ),
         )
     except TypeError:
@@ -149,6 +274,6 @@ def make_chat_model(
                 temperature=temperature,
                 max_retries=max_retries,
                 request_timeout=timeout,
-                **({ "callbacks": _callbacks } if _callbacks else {}),
+                **cb_kwargs,
             ),
         )
