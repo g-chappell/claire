@@ -7,6 +7,7 @@ import json
 import time
 import logging
 from contextvars import ContextVar
+from collections import defaultdict
 
 logger = logging.getLogger(__name__)
 
@@ -282,3 +283,181 @@ def reset_metrics() -> None:
     with _LOCK:
         _LLM_CALLS.clear()
         _TOOL_CALLS.clear()
+
+def _iter_jsonl(path: Path):
+    """
+    Yield dicts from a JSONL file, skipping blank / bad lines.
+    Works for both LLM and tool metrics.
+    """
+    if not path.exists():
+        return
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                yield json.loads(line)
+            except json.JSONDecodeError:
+                logger.warning("METRICS: bad json in %s: %.200s", path, line)
+
+def summarize_by_phase_agent(run_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    """
+    Aggregate metrics by (phase, agent).
+
+    Returns a list of dicts like:
+      {
+        "phase": "planning",
+        "agent": "tech_writer_tasks",
+        "llm_calls": 12,
+        "llm_input_tokens": 12345,
+        "llm_output_tokens": 6789,
+        "llm_total_tokens": 19134,
+        "llm_cost_usd": 0.42,
+        "llm_duration_s": 123.4,
+        "tool_calls": 5,
+        "tool_duration_s": 10.2,
+      }
+
+    If run_id is provided, only that run is included.
+    """
+    buckets: Dict[tuple, Dict[str, Any]] = defaultdict(
+        lambda: {
+            "phase": "",
+            "agent": "",
+            "llm_calls": 0,
+            "llm_input_tokens": 0,
+            "llm_output_tokens": 0,
+            "llm_total_tokens": 0,
+            "llm_cost_usd": 0.0,
+            "llm_duration_s": 0.0,
+            "tool_calls": 0,
+            "tool_duration_s": 0.0,
+        }
+    )
+
+    # LLM calls
+    for row in _iter_jsonl(_LLM_FILE):
+        if run_id is not None and row.get("run_id") != run_id:
+            continue
+
+        phase = row.get("phase") or "unknown"
+        agent = row.get("agent") or "unknown"
+        key = (phase, agent)
+        b = buckets[key]
+        b["phase"] = phase
+        b["agent"] = agent
+
+        b["llm_calls"] += 1
+        b["llm_input_tokens"] += int(row.get("input_tokens") or 0)
+        b["llm_output_tokens"] += int(row.get("output_tokens") or 0)
+        b["llm_total_tokens"] += int(row.get("total_tokens") or 0)
+        b["llm_cost_usd"] += float(row.get("cost_usd") or 0.0)
+        b["llm_duration_s"] += float(row.get("duration_s") or 0.0)
+
+    # Tool calls
+    for row in _iter_jsonl(_TOOL_FILE):
+        if run_id is not None and row.get("run_id") != run_id:
+            continue
+
+        phase = row.get("phase") or "unknown"
+        agent = row.get("agent") or "unknown"
+        key = (phase, agent)
+        b = buckets[key]
+        b["phase"] = phase
+        b["agent"] = agent
+
+        b["tool_calls"] += 1
+        b["tool_duration_s"] += float(row.get("duration_s") or 0.0)
+
+    return sorted(buckets.values(), key=lambda r: (r["phase"], r["agent"]))
+
+def summarize_by_story(run_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    """
+    Aggregate metrics at story level.
+
+    Returns a list of dicts like:
+      {
+        "run_id": "...",
+        "story_id": "S_123...",
+        "phases": ["planning", "coding"],
+        "agents": ["vision", "tech_writer_tasks", "coding_agent"],
+        "llm_calls": 10,
+        "llm_input_tokens": 20000,
+        "llm_output_tokens": 4000,
+        "llm_total_tokens": 24000,
+        "llm_cost_usd": 0.85,
+        "llm_duration_s": 300.0,
+        "tool_calls": 15,
+        "tool_duration_s": 25.5,
+      }
+    """
+    buckets: Dict[tuple, Dict[str, Any]] = defaultdict(
+        lambda: {
+            "run_id": "",
+            "story_id": "",
+            "phases": set(),
+            "agents": set(),
+            "llm_calls": 0,
+            "llm_input_tokens": 0,
+            "llm_output_tokens": 0,
+            "llm_total_tokens": 0,
+            "llm_cost_usd": 0.0,
+            "llm_duration_s": 0.0,
+            "tool_calls": 0,
+            "tool_duration_s": 0.0,
+        }
+    )
+
+    # LLM calls
+    for row in _iter_jsonl(_LLM_FILE):
+        if run_id is not None and row.get("run_id") != run_id:
+            continue
+
+        rid = row.get("run_id") or "unknown"
+        sid = row.get("story_id") or "unknown"
+        key = (rid, sid)
+        b = buckets[key]
+        b["run_id"] = rid
+        b["story_id"] = sid
+
+        phase = row.get("phase") or "unknown"
+        agent = row.get("agent") or "unknown"
+        b["phases"].add(phase)
+        b["agents"].add(agent)
+
+        b["llm_calls"] += 1
+        b["llm_input_tokens"] += int(row.get("input_tokens") or 0)
+        b["llm_output_tokens"] += int(row.get("output_tokens") or 0)
+        b["llm_total_tokens"] += int(row.get("total_tokens") or 0)
+        b["llm_cost_usd"] += float(row.get("cost_usd") or 0.0)
+        b["llm_duration_s"] += float(row.get("duration_s") or 0.0)
+
+    # Tool calls
+    for row in _iter_jsonl(_TOOL_FILE):
+        if run_id is not None and row.get("run_id") != run_id:
+            continue
+
+        rid = row.get("run_id") or "unknown"
+        sid = row.get("story_id") or "unknown"
+        key = (rid, sid)
+        b = buckets[key]
+        b["run_id"] = rid
+        b["story_id"] = sid
+
+        phase = row.get("phase") or "unknown"
+        agent = row.get("agent") or "unknown"
+        b["phases"].add(phase)
+        b["agents"].add(agent)
+
+        b["tool_calls"] += 1
+        b["tool_duration_s"] += float(row.get("duration_s") or 0.0)
+
+    # Convert sets → sorted lists for JSON/pandas friendliness
+    out: List[Dict[str, Any]] = []
+    for (rid, sid), b in buckets.items():
+        b["phases"] = sorted(b["phases"])
+        b["agents"] = sorted(b["agents"])
+        out.append(b)
+
+    return sorted(out, key=lambda r: (r["run_id"], r["story_id"]))
