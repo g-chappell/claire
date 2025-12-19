@@ -16,16 +16,23 @@ _SYSTEM = (
     "You are a Product Manager for software development, producing a concise Product Vision as structured JSON.\n"
     "Goal: define *what* we are building and *why*—NOT *how* it will be implemented.\n"
     "Hard caps: ≤{max_goals} goals, ≤{max_personas} personas, ≤{max_features} prioritized features.\n"
-    "Style: bullet points only; one sentence per bullet; avoid marketing fluff and repetition.\n"
-    "Scope: MVP only. Do not include roadmaps, phases, or future work.\n"
-    "Technology guidance: reflect constraints (if any), but do NOT prescribe repository paths, folder names, file names, CLI commands, or specific tools unless they are explicitly given in Constraints or Repo Conventions.\n"
+    "Style: bullet points only; one sentence per bullet; avoid marketing fluff, repetition, and vague statements.\n"
+    "Scope: MVP only. Do not include roadmaps, phases, future work, or stretch goals.\n"
+    "Content rules:\n"
+    "- Personas: real user types (e.g., 'Player', 'Admin'), not internal roles (e.g., 'Developer').\n"
+    "- Features: user-visible capabilities, phrased as outcomes; avoid implementation details.\n"
+    "- Goals: measurable outcomes (clarity, correctness, usability), not technical milestones.\n"
+    "Technology guidance: reflect constraints (if any), but do NOT prescribe repository paths, folder names, file names, CLI commands, or specific tools unless explicitly given in Constraints or Repo Conventions.\n"
     "When repo conventions are provided, reference them *generically* (e.g., “follow the existing client/server separation”) rather than naming concrete paths.\n"
-    "Prior feedback: Incorporate only actionable items from human/AI feedback below. Do not reintroduce deprecated choices or contradict current constraints.\n"
     "\n"
-    "CONTEXT:\n"
-    "--- PRIOR FEEDBACK START ---\n{feedback_context}\n--- PRIOR FEEDBACK END ---\n"
-    "--- HUMAN CONTEXT (optional) ---\n{human_context}\n"
-    "--- REPO CONVENTIONS (optional, summarize not prescribe) ---\n{repo_conventions}\n"
+    "EXEMPLAR / FEEDBACK HINTS (optional):\n"
+    "- The exemplar may contain prior feedback such as 'Human:' / 'AI:' notes or critiques.\n"
+    "- Treat any feedback inside the exemplar as guidance on *quality and structure* (what to improve/avoid).\n"
+    "- Do NOT copy exemplar content. Do NOT quote or repeat feedback text in your output.\n"
+    "- Apply the feedback implicitly by producing a better artefact for THIS requirement.\n"
+    "--- EXEMPLAR START ---\n{exemplar}\n--- EXEMPLAR END ---\n"
+    "\n"
+    "REPO CONVENTIONS (optional, summarize not prescribe):\n{repo_conventions}\n"
 )
  
 _PROMPT = ChatPromptTemplate.from_messages(
@@ -39,6 +46,7 @@ _PROMPT = ChatPromptTemplate.from_messages(
             "Constraints: {constraints}\n"
             "Non-functionals: {nfr}\n"
             "\n"
+            "Checklist before you answer: MVP-only, no implementation details, obey caps.\n"
             "Return JSON ONLY that matches the ProductVisionDraft schema."
         ),
     ]
@@ -49,8 +57,7 @@ def make_chain(llm: Any, **knobs: Any) -> Runnable:
     if knobs:
         defaults.update(knobs)
     # ensure placeholders exist even if not passed
-    defaults.setdefault("feedback_context", "")
-    defaults.setdefault("human_context", "")
+    defaults.setdefault("exemplar", "")
     defaults.setdefault("repo_conventions", "")
     prompt = _PROMPT.partial(**defaults)
 

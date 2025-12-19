@@ -2,6 +2,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Protocol, Sequence, Mapping, cast, TYPE_CHECKING
+import hashlib
 
 if TYPE_CHECKING:
     # Only for the type checker; no runtime import
@@ -15,17 +16,24 @@ class MemoryDoc:
     id: str
     text: str
     meta: Dict[str, str]  # e.g., {"run_id": "...", "type": "product_vision", "title": "..."}
+    # Optional text used ONLY for embeddings (similarity search). Stored document text remains `text`.
+    embed_text: Optional[str] = None
 
 class MemoryStore(Protocol):
     """Interface for vector memory."""
     def add(self, docs: List[MemoryDoc]) -> None: ...
+
     def search(
         self,
         query: str,
         top_k: int = 6,
         where: Optional[Dict] = None,
         min_similarity: Optional[float] = None,
-        ) -> List[MemoryDoc]: ...
+    ) -> List[MemoryDoc]: ...
+
+    # NEW: delete by metadata filter (used for overwrite semantics)
+    def delete_where(self, where: Dict) -> int: ...
+
     def purge(self) -> None: ...
 
 class NoOpMemoryStore:
@@ -40,6 +48,9 @@ class NoOpMemoryStore:
     def search(self, query: str, top_k: int = 6, where: Optional[Dict] = None, min_similarity: Optional[float] = None) -> List[MemoryDoc]:
         # no results in skeleton mode
         return []
+    
+    def delete_where(self, where: Dict) -> int:
+        return 0
 
     def purge(self) -> None:
         # nothing to purge
@@ -60,11 +71,36 @@ class ChromaMemoryStore:
         )
         from sentence_transformers import SentenceTransformer  # type: ignore
         self._collection_name = collection
-        self._col = self._client.get_or_create_collection(name=self._collection_name)
+
+        # Prefer cosine for normalized embeddings. NOTE: if collection already exists,
+        # Chroma will keep its existing space.
+        self._col = self._client.get_or_create_collection(
+            name=self._collection_name,
+            metadata={"hnsw:space": "cosine"},
+        )
+
+        # Capture the actual space for correct distance->similarity conversion.
+        try:
+            self._space = str((getattr(self._col, "metadata", None) or {}).get("hnsw:space", "l2")).lower()
+        except Exception:
+            self._space = "l2"
+
+        logger.info("CHROMA_INIT collection=%s space=%s embed_model=%s", self._collection_name, self._space, embed_model)
+
         self._embedder = SentenceTransformer(embed_model)
 
     def _embed(self, texts: List[str]) -> List[List[float]]:
         # Handle Tensor or ndarray or list return types
+        if texts:
+            sample = (texts[0] or "").replace("\n", "\\n")
+            logger.info(
+                "CHROMA_EMBED n=%d sample_len=%d sample_sha1=%s sample_prev=%s",
+                len(texts),
+                len(texts[0] or ""),
+                hashlib.sha1((texts[0] or "").encode("utf-8")).hexdigest()[:10],
+                (sample[:239] + "…") if len(sample) > 240 else sample,
+            )
+
         arr = self._embedder.encode(texts, normalize_embeddings=True)
         try:
             # ndarray / torch.Tensor path
@@ -78,10 +114,15 @@ class ChromaMemoryStore:
             return
 
         ids: List[str] = [d.id for d in docs]
-        documents: List[str] = [d.text for d in docs]
+        documents: List[str] = [d.text for d in docs]  # stored payload (what gets injected)
         # keep metadata values as strings to match Dict[str, str]
         metas_list: List[Dict[str, str]] = [d.meta for d in docs]
-        embeds_list: List[List[float]] = self._embed(documents)
+
+        # IMPORTANT: similarity is computed on embed_text when provided, otherwise on stored text.
+        embed_inputs: List[str] = [
+            (getattr(d, "embed_text", None) or d.text) for d in docs
+        ]
+        embeds_list: List[List[float]] = self._embed(embed_inputs)
 
         # Light-weight debug so you can see experiment/run tags flowing through
         if metas_list:
@@ -103,6 +144,54 @@ class ChromaMemoryStore:
 
         self._col.add(ids=ids_t, documents=docs_t, metadatas=metas_t, embeddings=embeds_t)
 
+    def _normalize_where(self, where: Optional[Dict]) -> Dict:
+        """
+        Chroma where-clause requirement (newer versions):
+        - Must be a single operator at the top level (e.g. {"$and":[...]}),
+        OR a single field constraint.
+        If caller provides multiple field constraints, wrap in {"$and":[...]}.
+        """
+        if not where:
+            return {}
+
+        # Already operator-based at top-level -> pass through
+        if any(str(k).startswith("$") for k in where.keys()):
+            logger.info("CHROMA_WHERE where_in=%s where_norm=%s", where, where)
+            return where
+
+        # Convert {"a":1,"b":2} -> {"$and":[{"a":1},{"b":2}]}
+        items = [{k: v} for k, v in where.items() if v is not None]
+        if not items:
+            return {}
+
+        if len(items) == 1:
+            norm = items[0]
+            logger.info("CHROMA_WHERE where_in=%s where_norm=%s", where, norm)
+            return norm
+
+        norm = {"$and": items}
+        logger.info("CHROMA_WHERE where_in=%s where_norm=%s", where, norm)
+        return norm
+    
+    def _distance_to_similarity(self, dist: float) -> float:
+        """
+        Convert Chroma distance to an approximate cosine-similarity-like score.
+
+        With normalize_embeddings=True:
+        - cosine space: dist = 1 - cos_sim        => cos_sim = 1 - dist
+        - l2 space:     dist = ||u - v|| (unit)   => cos_sim = 1 - (dist^2)/2
+        """
+        space = getattr(self, "_space", "l2")
+
+        if space == "cosine":
+            return 1.0 - dist
+
+        if space in ("l2", "euclidean"):
+            return 1.0 - (dist * dist) / 2.0
+
+        # Fallback
+        return 1.0 - dist
+
     def search(
         self,
         query: str,
@@ -115,7 +204,7 @@ class ChromaMemoryStore:
         res = self._col.query(
             query_embeddings=[q_emb],
             n_results=top_k,
-            where=where or {},
+            where=self._normalize_where(where),
             include=include_t,
         )
         out: List[MemoryDoc] = []
@@ -130,17 +219,63 @@ class ChromaMemoryStore:
         metas0 = cast(List[Mapping[str, Any]], metas[0]) if metas else []
         dists0 = cast(List[float], dists[0]) if dists else []
         for i, _id in enumerate(ids0):
-            # Convert distance -> similarity (cosine metric): sim = 1 - dist
-            sim = 1.0 - (dists0[i] if i < len(dists0) else 1.0)
+            dist = (dists0[i] if i < len(dists0) else 1.0)
+            sim = self._distance_to_similarity(dist)
+
+            # Helpful debug for first few candidates
+            if i < 3:
+                logger.info(
+                    "CHROMA_SCORE space=%s id=%s dist=%.4f sim=%.4f min_sim=%s where=%s",
+                    getattr(self, "_space", "unknown"),
+                    _id,
+                    float(dist),
+                    float(sim),
+                    min_similarity,
+                    where,
+                )
+
             if min_similarity is not None and sim < min_similarity:
                 continue
-            meta_dict: Dict[str, str] = {str(k): str(v) for k, v in (metas0[i] if i < len(metas0) else {}).items()}
+
+            meta_dict: Dict[str, str] = {
+                str(k): str(v)
+                for k, v in (metas0[i] if i < len(metas0) else {}).items()
+            }
             out.append(MemoryDoc(
                 id=_id,
                 text=docs0[i] if i < len(docs0) else "",
                 meta=meta_dict,
             ))
         return out
+    
+    def delete_where(self, where: Dict) -> int:
+        """
+        Delete docs matching a Chroma metadata filter.
+        Accepts either:
+        - {"run_id": "...", "type": "..."}  (we'll convert to $and)
+        - {"$and": [{"run_id": "..."}, {"type": "..."}]} (passed through)
+        Returns the number of deleted docs.
+        """
+        if not where:
+            return 0
+
+        where_norm = self._normalize_where(where)
+        if not where_norm:
+            return 0
+
+        try:
+            got = self._col.get(where=where_norm, limit=100000)
+            ids = got.get("ids") or []
+            ids_list = cast(List[str], ids)
+            if not ids_list:
+                return 0
+
+            ids_t: "IDs" = cast("IDs", ids_list)
+            self._col.delete(ids=ids_t)
+            return len(ids_list)
+        except Exception:
+            logger.exception("delete_where failed for where=%s (normalized=%s)", where, where_norm)
+            return 0
 
     def purge(self) -> None:
         # Preferred: drop and recreate the collection

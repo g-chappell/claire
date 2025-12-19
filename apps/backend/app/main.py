@@ -20,6 +20,8 @@ from app.api.runs import router as runs_router
 from app.api.plan import router as plan_router
 from app.api.runs_qol import router as runs_qol_router
 from app.api import coding as coding_router
+from app.api import debug_rag
+
 
 import logging
 
@@ -113,3 +115,4 @@ app.include_router(plan_router)
 app.include_router(runs_qol_router)
 app.include_router(memory_router)
 app.include_router(coding_router.router)
+app.include_router(debug_rag.router)

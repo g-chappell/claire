@@ -138,3 +138,22 @@ class StoryORM(Base):
     )
     # relationships (optional)
     # epic: Mapped[EpicORM] = relationship(backref="stories")
+
+# NEW: Plan-level artefact feedback (PV/TS/RA Plan/Story Tasks)
+class PlanArtifactFeedbackORM(Base):
+    __tablename__ = "plan_artifact_feedback"
+
+    id: Mapped[str] = mapped_column(String(50), primary_key=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"))
+    kind: Mapped[str] = mapped_column(String(30))  # product_vision | technical_solution | ra_plan | story_tasks
+    story_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
+
+    feedback_human: Mapped[str | None] = mapped_column(Text, nullable=True)
+    feedback_ai: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        Index("ux_plan_feedback_run_kind_story", "run_id", "kind", "story_id", unique=True),
+    )

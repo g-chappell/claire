@@ -36,10 +36,10 @@ _SYSTEM = (
     "- Do NOT prescribe file paths (e.g., __tests__/… or src/…); keep placement decisions conditional on repository conventions.\n"
     "- Do NOT name specific tools (Jest, Vitest, PyTest, Supertest, etc.).\n"
     "- Do NOT suggest code changes; specify expected behavior and verification only.\n\n"
-    "FEEDBACK INCORPORATION\n"
-    "- If prior feedback is provided, incorporate it directly into the scenarios and checklist. "
-    "Treat feedback as authoritative corrections to scope, edge cases, and acceptance clarity.\n"
-    "--- PRIOR FEEDBACK START ---\n{feedback_context}\n--- PRIOR FEEDBACK END ---\n"
+    "EXEMPLAR (optional)\n"
+    "- If provided, use it only as a quality/structure reference for how to express scenarios/checklists.\n"
+    "- Do NOT copy content; adapt to this story’s intent and interfaces.\n"
+    "--- EXEMPLAR START ---\n{exemplar}\n--- EXEMPLAR END ---\n"
 )
 
 _PROMPT = ChatPromptTemplate.from_messages(
@@ -47,14 +47,13 @@ _PROMPT = ChatPromptTemplate.from_messages(
         ("system", _SYSTEM),
         (
             "human",
-            # Keep inputs the same; we’re explicit about their role:
             "Story title: {title}\n"
             "Story description (acceptance intent, user value): {description}\n"
             "Epic: {epic_title}\n"
             "Solution interfaces (public surface the implementation must honor): {interfaces}"
         ),
     ]
-)
+).partial(exemplar="")
 
 def make_chain(llm: BaseChatModel) -> Runnable:
     use_function_calling = False
