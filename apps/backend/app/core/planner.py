@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Dict, Optional, Literal, cast
+from typing import Any, Dict, Optional, Literal, cast, Callable
 
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import Session
@@ -266,13 +266,17 @@ def _persist_vision_solution(db: Session, run_id: str,
 
 
 # --- NEW: stage 1 - generate PV/TS only ---
-def generate_vision_solution(db: Session, run_id: str, rag_context: str | None = None,) -> tuple[ProductVision, TechnicalSolution]:
+def generate_vision_solution(
+    db: Session,
+    run_id: str,
+    exemplars: dict[str, str] | None = None,
+) -> tuple[ProductVision, TechnicalSolution]:
     """Run Vision + Architecture chains and persist only those results."""
 
     cfg = _get_run_config(db, run_id)
     pm = _build_pm_from_cfg(cfg)
 
-    req: RequirementORM | None = (
+    req = (
         db.query(RequirementORM)
         .filter(RequirementORM.run_id == run_id)
         .order_by(RequirementORM.id.asc())
@@ -280,32 +284,35 @@ def generate_vision_solution(db: Session, run_id: str, rag_context: str | None =
     )
     if not req:
         raise ValueError("requirement not found for run")
-    
-    # If RAG is enabled upstream, inject context into the description so
-    # downstream prompt builders can reuse it without any other changes.
-    combined_desc = req.description or ""
-    if rag_context:
-        combined_desc = (
-        combined_desc.rstrip() + "\n\nYou may reuse relevant items from prior approved artefacts:\n" + rag_context + "\n\nIf irrelevant, ignore them.")
 
     p_req = Requirement(
         id=req.id,
         title=req.title,
-        description=combined_desc,
+        description=req.description or "",  # exemplar passed separately
         constraints=req.constraints or [],
         priority=_coerce_priority(getattr(req, "priority", None)),
         non_functionals=req.non_functionals or [],
     )
 
-    pv, ts = pm.plan_vision_solution(p_req.model_dump(), db=db, run_id=run_id)
+    pv, ts = pm.plan_vision_solution(
+        p_req.model_dump(),
+        db=db,
+        run_id=run_id,
+        exemplars=exemplars or {},
+    )
     _persist_vision_solution(db, run_id, pv, ts)
     return pv, ts
 
 
 # --- NEW: stage 2 - finalise the plan from PV/TS (plus optional overrides) ---
-def finalise_plan(db: Session, run_id: str,
-                  vision_override: dict | None = None,
-                  solution_override: dict | None = None) -> PlanBundle:
+def finalise_plan(
+    db: Session,
+    run_id: str,
+    vision_override: dict | None = None,
+    solution_override: dict | None = None,
+    exemplars: dict[str, str] | None = None,
+    tasks_exemplar_resolver: Callable[[Story], str] | None = None,
+) -> PlanBundle:
     """
     Produce epics, stories, acceptance, tasks, and design notes using the
     currently stored PV/TS, optionally applying overrides from the request.
@@ -380,6 +387,8 @@ def finalise_plan(db: Session, run_id: str,
         db=db,
         run_id=run_id,
         prompt_context_mode=cfg.prompt_context_mode,
+        exemplars=exemplars or {},
+        tasks_exemplar_resolver=tasks_exemplar_resolver,
     )
     _persist_plan(db, run_id, req, bundle)
     return bundle

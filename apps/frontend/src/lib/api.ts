@@ -137,18 +137,27 @@ export function finalisePlan(
 export async function commitMemory(payload: {
   run_id: string;
   artifacts: {
-    type: "requirement" | "product_vision" | "technical_solution";
+    type:
+      | "requirement"
+      | "product_vision"
+      | "technical_solution"
+      | "ra_plan"
+      | "qa_spec"
+      | "design_notes"
+      | "story_tasks";
     title?: string;
+    story_id?: string; // ✅ add this
     text: string;
   }[];
 }) {
-  const res = await fetch(`${import.meta.env.VITE_API_URL}/memory/ingest`, {
+  // Use the same resolved base URL as the rest of your API calls
+  const res = await fetch(`${BASE_URL}/memory/ingest`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error(await res.text());
-  return res.json();
+  return res.json() as Promise<{ ok: boolean; added: number; deleted?: number }>;
 }
 
 export async function updateGateStatus(runId: string, status: "approved"|"draft"|"rejected") {
@@ -220,6 +229,12 @@ export async function fetchPlanBundle(runId: string): Promise<{
 
 export type Kind = "epic" | "story" | "task";
 
+export type PlanArtifactKind =
+  | "product_vision"
+  | "technical_solution"
+  | "ra_plan"
+  | "story_tasks";
+
 export async function patchFeedback(runId: string, kind: Kind, id: string, payload: { human?: string; ai?: string }) {
   const res = await fetch(`${BASE}/runs/${runId}/${kind}/${id}/feedback`, {
     method: "PATCH",
@@ -238,4 +253,54 @@ export async function synthesizeAIFeedback(runId: string, kind: Kind, id: string
   });
   if (!res.ok) throw new Error(`synthesizeAIFeedback failed: ${res.status}`);
   return res.json();
+}
+
+/**
+ * Plan-level feedback (run_id + artefact type).
+ *
+ * IMPORTANT: these endpoints must exist in the backend.
+ * Recommended backend routes:
+ *  - PATCH /runs/{run_id}/plan/{kind}/feedback
+ *  - POST  /runs/{run_id}/plan/{kind}/feedback/ai
+ *
+ * where kind ∈ product_vision | technical_solution | ra_plan | story_tasks
+ */
+export async function patchPlanFeedback(
+  runId: string,
+  kind: PlanArtifactKind,
+  payload: { human?: string; ai?: string; story_id?: string }
+): Promise<{ ok: boolean; kind: PlanArtifactKind; story_id?: string; human?: string; ai?: string }> {
+      const res = await fetch(`${BASE_URL}/runs/${encodeURIComponent(runId)}/plan-feedback/${kind}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function synthesizePlanAIFeedback(
+  runId: string,
+  kind: PlanArtifactKind,
+  payload?: { human_override?: string; story_id?: string }
+): Promise<{ ok: boolean; kind: PlanArtifactKind; story_id?: string; ai: string; model?: string }> {
+      const res = await fetch(`${BASE_URL}/runs/${encodeURIComponent(runId)}/plan-feedback/${kind}/ai`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload ?? {}),
+    }
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function getPlanFeedback(
+  runId: string,
+  kind: PlanArtifactKind,
+  payload?: { story_id?: string }
+): Promise<{ ok: boolean; kind: PlanArtifactKind; story_id?: string; human: string; ai: string; updated_at?: string | null }> {
+  const q =
+    payload?.story_id ? `?story_id=${encodeURIComponent(payload.story_id)}` : "";
+  return req(`/runs/${encodeURIComponent(runId)}/plan-feedback/${kind}${q}`);
 }

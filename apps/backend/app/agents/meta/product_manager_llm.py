@@ -9,7 +9,7 @@ from app.storage.models import (
 )
 
 import hashlib
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Type, TypeVar, cast
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Type, TypeVar, cast, Callable
 
 from pydantic import BaseModel
 
@@ -151,6 +151,15 @@ def _invoke_typed(expected_type: Type[T], chain, inp: Dict[str, Any], config: Op
     # (Alternatively, raise a ValueError here if you require strictness.)
     return cast(T, out)
 
+def _as_lines(v: Any) -> str:
+    if v is None:
+        return ""
+    if isinstance(v, str):
+        return v
+    if isinstance(v, (list, tuple)):
+        return "\n".join([str(x) for x in v if str(x).strip()])
+    return str(v)
+
 
 def _sequence_to_list(xs: Optional[Sequence[str]]) -> List[str]:
     return [x for x in (xs or []) if isinstance(x, str) and x.strip()]
@@ -166,6 +175,8 @@ def _normalize_stack(items: Sequence[str]) -> set[str]:
             if tok:
                 norm.add(tok)
     return norm
+
+
 
 
 def _order_epics_and_stories(epics: List[Epic], stories: List[Story]) -> Tuple[List[Epic], List[Story]]:
@@ -274,6 +285,7 @@ class ProductManagerLLM:
         # Remember for metrics
         self.provider_name = provider_name
         self.model_name = model_name or ""
+        self.settings = settings
 
         logger.info(
             "PM_INIT provider=%s model=%s temp=%s",
@@ -298,22 +310,33 @@ class ProductManagerLLM:
     def plan_vision_solution(
         self,
         requirement: Dict[str, str],
-        db: Session, run_id: str,
+        db: Session,
+        run_id: str,
+        memory_store: Any = None,
         config: Optional[RunnableConfig] = None,
-    ) -> Tuple[ProductVision, TechnicalSolution]:
+        exemplars: Optional[Dict[str, str]] = None,
+    ) -> tuple[ProductVision, TechnicalSolution]:
         """
         Generate ProductVision and TechnicalSolution only. Use this to implement the 'gate' UX.
         """
-        fctx = build_feedback_context_for_run(db, run_id=run_id)
+
+        ex = exemplars or {}
+
+        # Default: use whatever was passed in (legacy)
+        pv_exemplar = (ex.get("product_vision") or "").strip()
+        ts_exemplar = (ex.get("technical_solution") or "").strip()
 
         # ---------------- Vision (LLM call + metrics) ----------------
+        constraints_val = _as_lines(requirement.get("constraints", ""))
+        nfr_val = _as_lines(requirement.get("non_functionals", requirement.get("nfr", "")))
+
         vision_payload = {
             "req_id": requirement.get("id", ""),
             "title": requirement.get("title", ""),
             "description": requirement.get("description", ""),
-            "constraints": requirement.get("constraints", ""),
-            "nfr": requirement.get("nfr", ""),
-            "feedback_context": fctx,
+            "constraints": constraints_val,
+            "nfr": nfr_val,
+            "exemplar": pv_exemplar,
         }
         v_start = time.perf_counter()
         v_draft: ProductVisionDraft = _invoke_typed(
@@ -347,12 +370,15 @@ class ProductManagerLLM:
         )
 
         # ---------------- Architecture (LLM call + metrics) ----------------
+        constraints_val = requirement.get("constraints", "")
+        nfr_val = requirement.get("non_functionals", requirement.get("nfr", ""))
+
         arch_payload = {
             "title": requirement.get("title", ""),
             "features": ", ".join(vision.features),
-            "constraints": requirement.get("constraints", ""),
-            "nfr": requirement.get("nfr", ""),
-            "feedback_context": fctx,
+            "constraints": constraints_val,
+            "nfr": nfr_val,
+            "exemplar": ts_exemplar,
         }
         a_start = time.perf_counter()
         a_draft: TechnicalSolutionDraft = _invoke_typed(
@@ -402,15 +428,23 @@ class ProductManagerLLM:
         solution: TechnicalSolution,
         db: Session,
         run_id: str,
+        memory_store: Any = None,
         prompt_context_mode: str = "structured",
         config: Optional[RunnableConfig] = None,
+        exemplars: Optional[Dict[str, str]] = None,
+        tasks_exemplar_resolver: Optional[Callable[[Story], str]] = None,
     ) -> PlanBundle:
         """
         Given an approved ProductVision + TechnicalSolution, produce the rest of the bundle.
         """
 
-        # Global feedback context for this run (used by most sub-chains)
-        fctx_global = build_feedback_context_for_run(db, run_id=run_id)
+        ex = exemplars or {}
+
+        # Default (legacy): passed-in exemplars
+        ra_exemplar = (ex.get("ra_plan") or "").strip()
+        qa_exemplar = (ex.get("qa_spec") or "").strip()
+        dn_exemplar = (ex.get("design_notes") or "").strip()
+        tasks_exemplar_fallback = (ex.get("story_tasks") or "").strip()
 
         # Requirements Analyst → Epics + Stories
         # Experiment knob (per-run): prompt_context_mode
@@ -431,7 +465,7 @@ class ProductManagerLLM:
             len(vision.features or []),
             len(solution.modules or []),
             len(solution.decisions or []),
-            bool(fctx_global),
+            bool((ra_exemplar or "").strip()),
         )
 
         if mode == "structured":
@@ -439,21 +473,19 @@ class ProductManagerLLM:
             ra_inputs = {
                 "features": ", ".join(vision.features),
                 "modules": ", ".join(solution.modules),
-                "interfaces": ", ".join(
-                    f"{k}:{v}" for k, v in (solution.interfaces or {}).items()
-                ),
+                "interfaces": ", ".join(f"{k}:{v}" for k, v in (solution.interfaces or {}).items()),
                 "decisions": ", ".join(solution.decisions or []),
-                "feedback_context": fctx_global,
+                "exemplar": ra_exemplar,
             }
         else:
             # features_only / minimal → ablate TS + feedback context
             ra_inputs = {
                 "features": ", ".join(vision.features),
-                # strip architecture + decisions + feedback context for ablation
                 "modules": "",
                 "interfaces": "",
                 "decisions": "",
                 "feedback_context": "",
+                "exemplar": ra_exemplar,
             }
 
         # Choose RA chain based on mode
@@ -636,15 +668,13 @@ class ProductManagerLLM:
             qa_inputs = []
             for s in stories:
                 epic_title = next((e.title for e in epics if e.id == s.epic_id), "")
-                fctx_story = build_feedback_context_for_run(
-                    db, run_id=run_id, epic_title=epic_title, story_title=s.title
-                )
+
                 qa_inputs.append({
                     "title": s.title,
                     "description": s.description,
                     "epic_title": epic_title,
                     "interfaces": ", ".join(f"{k}:{v}" for k, v in (solution.interfaces or {}).items()),
-                    "feedback_context": fctx_story,   # <-- story-specific
+                    "exemplar": qa_exemplar,
                 })
             try:
                 qa_start = time.perf_counter()
@@ -698,7 +728,7 @@ class ProductManagerLLM:
                 "decisions": ", ".join(solution.decisions or []),
                 "epic_titles": ", ".join(e.title for e in epics[:6]),
                 "story_titles": ", ".join(s.title for s in stories[:12]),
-                "feedback_context": fctx_global,
+                "exemplar": dn_exemplar,
             }
             notes_start = time.perf_counter()
             notes_bundle: TechWritingBundleDraft = _invoke_typed(
@@ -759,15 +789,21 @@ class ProductManagerLLM:
 
         for s in stories:
             epic_title = epic_title_by_id.get(s.epic_id, "")
-            fctx_story = build_feedback_context_for_run(
-                db, run_id=run_id, epic_title=epic_title, story_title=s.title
-            )
+
+            # NEW: try per-story exemplar; fall back to shared exemplar
+            story_exemplar = tasks_exemplar_fallback
+            if tasks_exemplar_resolver is not None:
+                try:
+                    story_exemplar = (tasks_exemplar_resolver(s) or "").strip() or tasks_exemplar_fallback
+                except Exception:
+                    story_exemplar = tasks_exemplar_fallback
+
             payload: Dict[str, str] = {
                 "story_title": s.title,
                 "story_description": s.description,
                 "epic_title": epic_title_by_id.get(s.epic_id, ""),
                 "interfaces": ", ".join(f"{k}:{v}" for k, v in (solution.interfaces or {}).items()),
-                "feedback_context": fctx_story,   # <-- story-specific
+                "exemplar": story_exemplar,
             }
             if settings.FEATURE_QA:
                 gherkin_block = "\n".join(
@@ -837,8 +873,10 @@ class ProductManagerLLM:
         requirement: Dict[str, str],
         db: Session,
         run_id: str,
+        memory_store: Any = None,
         prompt_context_mode: str = "structured",
         config: Optional[RunnableConfig] = None,
+        exemplars: Optional[Dict[str, str]] = None,
     ) -> PlanBundle:
         """
         Convenience: run Stage A (PV/TS) then Stage B (epics/stories/etc)
@@ -848,7 +886,9 @@ class ProductManagerLLM:
             requirement,
             db=db,
             run_id=run_id,
+            memory_store=memory_store,
             config=config,
+            exemplars=exemplars,
         )
         return self.plan_remaining(
             requirement,
@@ -856,6 +896,8 @@ class ProductManagerLLM:
             solution,
             db=db,
             run_id=run_id,
+            memory_store=memory_store,
             prompt_context_mode=prompt_context_mode,
             config=config,
+            exemplars=exemplars,
         )

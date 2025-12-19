@@ -1,22 +1,33 @@
 // apps/frontend/src/pages/Retrospective.tsx
-import { useEffect, useMemo, useState } from "react";
-import { BASE, getPlan as loadPlan, patchFeedback, synthesizeAIFeedback, type Kind } from "../lib/api";
+import { useEffect, useState } from "react";
+import { BASE, getPlan as loadPlan, getVisionSolution, patchPlanFeedback, synthesizePlanAIFeedback, commitMemory, getPlanFeedback, type PlanArtifactKind } from "../lib/api";
 
 type RunLite = { id: string; title?: string };
-type Epic = { id: string; title: string; description?: string; feedback_human?: string; feedback_ai?: string };
+type Epic = {
+  id: string;
+  title: string;
+  description?: string;
+  priority_rank?: number;
+  feedback_human?: string;
+  feedback_ai?: string;
+};
+
 type Story = {
   id: string;
   epic_id?: string;
   title: string;
   description?: string;
+  priority_rank?: number;
   feedback_human?: string;
   feedback_ai?: string;
 };
+
 type Task = {
   id: string;
   story_id?: string;
   title: string;
   description?: string;
+  order?: number;
   feedback_human?: string;
   feedback_ai?: string;
 };
@@ -30,21 +41,25 @@ export default function RetrospectivePage() {
   const [stories, setStories] = useState<Story[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
 
-  // Filters
-  const [selectedEpicId, setSelectedEpicId] = useState<string>("");
-  const [selectedStoryIdFilter, setSelectedStoryIdFilter] = useState<string>("");
+  // PV/TS (stage-gate)
+  const [visionSolution, setVisionSolution] = useState<any | null>(null);
 
   // Artefact selection
-  const [kind, setKind] = useState<Kind>("epic");
-  const [selectedId, setSelectedId] = useState("");
+  const [kind, setKind] = useState<PlanArtifactKind>("product_vision");
 
-  // Feedback editors
+  // Story selector (required for story_tasks)
+  const [selectedStoryId, setSelectedStoryId] = useState<string>("");
+
+  // Context (what the SM sees + what you ingest as exemplar)
+  const [contextText, setContextText] = useState<string>("");
+
+  // Feedback editors (run-level feedback)
   const [human, setHuman] = useState("");
   const [ai, setAI] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
-  // Load runs
+  // ---------------- Load runs ----------------
   useEffect(() => {
     (async () => {
       const r = await fetch(`${BASE}/runs`);
@@ -54,121 +69,170 @@ export default function RetrospectivePage() {
     })();
   }, []);
 
-  // Load plan bundle for run
+  // ---------------- Load plan + PV/TS for run ----------------
   useEffect(() => {
     if (!runId) return;
     (async () => {
       try {
+        // Plan bundle (for RA plan + story_tasks context generation)
         const bundle = await loadPlan(runId);
-        setEpics(bundle?.epics ?? []);
-        setStories(bundle?.stories ?? []);
+        const nextEpics = bundle?.epics ?? [];
+        const nextStories = bundle?.stories ?? [];
+
+        setEpics(nextEpics);
+        setStories(nextStories);
+
+        // Default story selection for story_tasks
+        setSelectedStoryId(nextStories[0]?.id ?? "");
+
         const flatTasks =
           (bundle?.stories ?? []).flatMap((s: any) =>
             (s.tasks ?? []).map((t: any) => ({ ...t, story_id: s.id }))
           );
         setTasks(flatTasks);
 
-        // Reset UI on run change
-        setSelectedEpicId("");
-        setSelectedStoryIdFilter("");
-        setSelectedId("");
-        setHuman("");
-        setAI("");
+        // PV/TS (for PV/TS context)
+        try {
+          const vs = await getVisionSolution(runId);
+          setVisionSolution(vs);
+        } catch {
+          setVisionSolution(null);
+        }
+
+        // Reset feedback UI when run changes
         setMsg(null);
       } catch (e) {
         console.error("load plan failed", e);
-        setEpics([]); setStories([]); setTasks([]);
+        setEpics([]);
+        setStories([]);
+        setTasks([]);
+        setVisionSolution(null);
       }
     })();
   }, [runId]);
 
-  // ---------- FILTERED VIEWS ----------
-  // Epics filtered (if epic filter set, show only that one)
-  const epicsFiltered = useMemo(() => {
-    if (!selectedEpicId) return epics;
-    return epics.filter(e => e.id === selectedEpicId);
-  }, [epics, selectedEpicId]);
-
-  // Stories filtered by epic filter, then optional story filter
-  const storiesByEpic = useMemo(() => {
-    if (!selectedEpicId) return stories;
-    return stories.filter(s => (s.epic_id || "") === selectedEpicId);
-  }, [stories, selectedEpicId]);
-
-  const storiesFiltered = useMemo(() => {
-    if (!selectedStoryIdFilter) return storiesByEpic;
-    return storiesByEpic.filter(s => s.id === selectedStoryIdFilter);
-  }, [storiesByEpic, selectedStoryIdFilter]);
-
-  // Tasks filtered by story filter, else by epic filter, else all
-  const tasksByEpic = useMemo(() => {
-    if (!selectedEpicId) return tasks;
-    const allowedStoryIds = new Set(stories.filter(s => (s.epic_id || "") === selectedEpicId).map(s => s.id));
-    return tasks.filter(t => t.story_id && allowedStoryIds.has(t.story_id));
-  }, [tasks, stories, selectedEpicId]);
-
-  const tasksFiltered = useMemo(() => {
-    if (selectedStoryIdFilter) {
-      return tasks.filter(t => t.story_id === selectedStoryIdFilter);
-    }
-    return tasksByEpic;
-  }, [tasks, tasksByEpic, selectedStoryIdFilter]);
-
-  // ---------- ARTEFACT CANDIDATES (RESPECT FILTERS FOR ALL TYPES) ----------
-  const candidates = useMemo(() => {
-    if (kind === "epic") {
-      return epicsFiltered.map(x => ({ id: x.id, label: x.title, human: x.feedback_human, ai: x.feedback_ai }));
-    }
-    if (kind === "story") {
-      return storiesFiltered.map(x => ({ id: x.id, label: x.title, human: x.feedback_human, ai: x.feedback_ai }));
-    }
-    return tasksFiltered.map(x => ({ id: x.id, label: x.title, human: x.feedback_human, ai: x.feedback_ai }));
-  }, [kind, epicsFiltered, storiesFiltered, tasksFiltered]);
-
-  // Selected artefact + context
-  const selectedItem = useMemo(() => {
-    if (!selectedId) return null;
-    if (kind === "epic")  return epics.find(e => e.id === selectedId) || null;
-    if (kind === "story") return stories.find(s => s.id === selectedId) || null;
-    return tasks.find(t => t.id === selectedId) || null;
-  }, [kind, selectedId, epics, stories, tasks]);
-
-  const selectedLabel = useMemo(() => {
-    const c = candidates.find(c => c.id === selectedId);
-    return c?.label || "";
-  }, [selectedId, candidates]);
-
-  const selectedDescription = (selectedItem as any)?.description || "";
-
-  // Reset feedback boxes when selection changes
   useEffect(() => {
-    const chosen = candidates.find(c => c.id === selectedId);
-    setHuman(chosen?.human || "");
-    setAI(chosen?.ai || "");
-  }, [selectedId, candidates]);
+  if (!runId) return;
 
-  // Counts
-  const counts = useMemo(() => {
-    const totals = {
-      epics: epics.length,
-      stories: stories.length,
-      tasks: tasks.length,
-    };
-    const filtered = {
-      epics: epicsFiltered.length,
-      stories: storiesFiltered.length,
-      tasks: tasksFiltered.length,
-    };
-    return { totals, filtered };
-  }, [epics, stories, tasks, epicsFiltered, storiesFiltered, tasksFiltered]);
+  // story_tasks requires story_id
+  if (kind === "story_tasks" && !selectedStoryId) {
+    setHuman("");
+    setAI("");
+    return;
+  }
 
-  // Actions
-  async function saveHuman() {
-    if (!runId || !selectedId) return;
+  (async () => {
+    try {
+      const out = await getPlanFeedback(runId, kind, {
+        story_id: kind === "story_tasks" ? selectedStoryId : undefined,
+      });
+      setHuman(out?.human ?? "");
+      setAI(out?.ai ?? "");
+    } catch (e) {
+      console.error("getPlanFeedback failed", e);
+      // don't wipe fields on transient error; optional:
+      // setHuman(""); setAI("");
+    }
+  })();
+}, [runId, kind, selectedStoryId]);
+
+  // ---------------- Helpers: build run-level context ----------------
+  function buildProductVisionContext() {
+    const pv = visionSolution?.product_vision ?? null;
+    return pv ? JSON.stringify(pv, null, 2) : "(No Product Vision found for this run)";
+  }
+
+  function buildTechnicalSolutionContext() {
+    const ts = visionSolution?.technical_solution ?? null;
+    return ts ? JSON.stringify(ts, null, 2) : "(No Technical Solution found for this run)";
+  }
+
+  function buildRaPlanContext() {
+    const lines: string[] = [];
+    lines.push("RA PLAN (EPICS & STORIES)");
+    lines.push("");
+
+    const eps = [...epics].sort((a: any, b: any) => (a.priority_rank ?? 0) - (b.priority_rank ?? 0));
+    const sts = [...stories].sort((a: any, b: any) => (a.priority_rank ?? 0) - (b.priority_rank ?? 0));
+
+    for (const e of eps) {
+      lines.push(`EPIC: ${e.title || "(untitled)"}`);
+      if (e.description) lines.push(e.description);
+      lines.push("");
+
+      const eStories = sts.filter(s => (s.epic_id || "") === e.id);
+      if (!eStories.length) {
+        lines.push("  (no stories)");
+        lines.push("");
+        continue;
+      }
+
+      lines.push("  STORIES:");
+      for (const s of eStories) {
+        lines.push(`  - ${s.title || "(untitled story)"}`);
+        if (s.description) lines.push(`    ${s.description}`);
+      }
+      lines.push("");
+    }
+
+    return lines.join("\n");
+  }
+
+  function buildStoryTasksContext(storyId: string) {
+    if (!storyId) return "(Select a story to view Story Tasks context)";
+
+    const s = stories.find(x => x.id === storyId);
+    if (!s) return "(Story not found for this run)";
+
+    const lines: string[] = [];
+    lines.push("STORY TASKS (SELECTED STORY)");
+    lines.push("");
+    lines.push(`STORY: ${s.title || "(untitled story)"}`);
+    if (s.description) lines.push(s.description);
+    lines.push("");
+
+    const sTasks = tasks
+      .filter(t => t.story_id === s.id)
+      .sort((a: any, b: any) => ((a as any).order ?? 0) - ((b as any).order ?? 0));
+
+    if (!sTasks.length) {
+      lines.push("  TASKS: (none)");
+      lines.push("");
+      return lines.join("\n");
+    }
+
+    lines.push("  TASKS:");
+    for (const t of sTasks) {
+      lines.push(`  - ${t.title || "(untitled task)"}`);
+      if (t.description) lines.push(`    ${t.description}`);
+    }
+    lines.push("");
+
+    return lines.join("\n");
+  }
+
+  // Update context when kind changes OR data changes
+  useEffect(() => {
+    if (kind === "product_vision") setContextText(buildProductVisionContext());
+    else if (kind === "technical_solution") setContextText(buildTechnicalSolutionContext());
+    else if (kind === "ra_plan") setContextText(buildRaPlanContext());
+    else setContextText(buildStoryTasksContext(selectedStoryId));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind, visionSolution, epics, stories, tasks, selectedStoryId]);
+
+  // ---------------- Actions ----------------
+  async function saveFeedback() {
+    if (!runId) return;
     setBusy(true); setMsg(null);
     try {
-      const out = await patchFeedback(runId, kind, selectedId, { human });
-      setAI(out.ai || "");
+      // Plan-level feedback: run_id + artefact_type only (no IDs)
+            const out = await patchPlanFeedback(runId, kind, {
+        human,
+        ai,
+        story_id: kind === "story_tasks" ? selectedStoryId : undefined,
+      });
+      setHuman(out?.human ?? human);
+      setAI(out?.ai ?? ai);
       setMsg("Saved ✅");
     } catch (e: any) {
       setMsg(`Save failed: ${e?.message || e}`);
@@ -178,12 +242,15 @@ export default function RetrospectivePage() {
   }
 
   async function genAI() {
-    if (!runId || !selectedId) return;
+    if (!runId) return;
     setBusy(true); setMsg(null);
     try {
-      const out = await synthesizeAIFeedback(runId, kind, selectedId, human || undefined);
-      setAI(out.ai || "");
-      setMsg(`AI feedback generated (${out.model}) ✅`);
+      const out = await synthesizePlanAIFeedback(runId, kind, {
+        human_override: human || undefined,
+        story_id: kind === "story_tasks" ? selectedStoryId : undefined,
+      });
+      setAI(out?.ai || "");
+      setMsg(`AI feedback generated (${out?.model || "model"}) ✅`);
     } catch (e: any) {
       setMsg(`AI failed: ${e?.message || e}`);
     } finally {
@@ -191,134 +258,104 @@ export default function RetrospectivePage() {
     }
   }
 
-  // ---------- RENDER ----------
+  async function commitSelectedAsExemplar() {
+    if (!runId) return;
+    setBusy(true); setMsg(null);
+    try {
+      const storyTitle =
+        kind === "story_tasks"
+          ? (stories.find(s => s.id === selectedStoryId)?.title || selectedStoryId || "(unknown story)")
+          : "";
+      // Build exemplar text: context + feedback (this is what “good looks like”)
+      const exemplar = [
+        `TYPE: ${kind}`,
+        "",
+        "CONTEXT:",
+        contextText || "(none)",
+        "",
+        "HUMAN FEEDBACK:",
+        human?.trim() ? human.trim() : "(none)",
+        "",
+        "AI FEEDBACK:",
+        ai?.trim() ? ai.trim() : "(none)",
+        "",
+      ].join("\n");
+
+      const out = await commitMemory({
+        run_id: runId,
+        artifacts: [{
+          type: kind as any,
+          title: kind === "story_tasks" ? `Story Tasks — ${storyTitle}` : undefined,
+          story_id: kind === "story_tasks" ? selectedStoryId : undefined, // ✅ add this
+          text: exemplar
+        }],
+      });
+
+      const del = typeof out.deleted === "number" ? `, deleted ${out.deleted}` : "";
+      setMsg(`Committed exemplar to RAG (${kind}${del}, +${out.added}) ✅`);
+    } catch (e: any) {
+      setMsg(`Commit failed: ${e?.message || e}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // ---------------- Render ----------------
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-4">
-      {/* Header + totals */}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Retrospective & Feedback</h1>
-        <div className="text-sm text-slate-600 space-x-3">
-          <span>Epics: {counts.totals.epics}</span>
-          <span>Stories: {counts.totals.stories}</span>
-          <span>Tasks: {counts.totals.tasks}</span>
-        </div>
       </div>
 
-      {/* Filters */}
+      {/* Run */}
       <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <h2 className="mb-3 text-lg font-semibold">Filters</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          {/* Run */}
-          <div>
-            <div className="mb-1 text-sm text-slate-700">Run</div>
-            <select
-              className="w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-              value={runId}
-              onChange={e => {
-                setRunId(e.target.value);
-              }}
-            >
-              {runs.map(r => <option key={r.id} value={r.id}>{r.id}</option>)}
-            </select>
-          </div>
+        <h2 className="mb-3 text-lg font-semibold">Run</h2>
+        <select
+          className="w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+          value={runId}
+          onChange={e => setRunId(e.target.value)}
+        >
+          {runs.map(r => <option key={r.id} value={r.id}>{r.id}</option>)}
+        </select>
+      </section>
 
-          {/* Epic filter */}
-          <div>
-            <div className="mb-1 text-sm text-slate-700">
-              Epic filter <span className="text-xs text-slate-400">(scopes stories & tasks)</span>
-            </div>
+      {/* Artefact type */}
+      <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <h2 className="mb-3 text-lg font-semibold">Artefact type</h2>
+        <select
+          className="w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+          value={kind}
+          onChange={e => setKind(e.target.value as PlanArtifactKind)}
+        >
+          <option value="product_vision">Product Vision</option>
+          <option value="technical_solution">Technical Solution</option>
+          <option value="ra_plan">RA Plan (Epics & Stories)</option>
+          <option value="story_tasks">Story Tasks (all stories)</option>
+        </select>
+                {kind === "story_tasks" && (
+          <div className="mt-3">
+            <div className="mb-1 text-sm text-slate-700">Story (required for Story Tasks)</div>
             <select
               className="w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-              value={selectedEpicId}
-              onChange={e => {
-                setSelectedEpicId(e.target.value);
-                setSelectedStoryIdFilter("");
-                setSelectedId("");
-              }}
+              value={selectedStoryId}
+              onChange={e => setSelectedStoryId(e.target.value)}
             >
-              <option value="">All epics</option>
-              {epics.map(e => (
-                <option key={e.id} value={e.id}>{e.title}</option>
-              ))}
-            </select>
-            <div className="mt-1 text-xs text-slate-500">
-              Filtered — Epics: {counts.filtered.epics} • Stories: {counts.filtered.stories} • Tasks: {counts.filtered.tasks}
-            </div>
-          </div>
-
-          {/* Story filter */}
-          <div>
-            <div className="mb-1 text-sm text-slate-700">
-              Story filter <span className="text-xs text-slate-400">(scopes tasks; narrowed by epic if set)</span>
-            </div>
-            <select
-              className="w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-              value={selectedStoryIdFilter}
-              onChange={e => {
-                setSelectedStoryIdFilter(e.target.value);
-                setSelectedId("");
-              }}
-            >
-              <option value="">All stories{selectedEpicId ? " in selected epic" : ""}</option>
-              {(selectedEpicId ? storiesByEpic : stories).map(s => (
-                <option key={s.id} value={s.id}>{s.title}</option>
+              {stories.map(s => (
+                <option key={s.id} value={s.id}>
+                  {s.title || s.id}
+                </option>
               ))}
             </select>
           </div>
+        )}
+
+        <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+          <div className="mb-1 text-sm text-slate-700">Context (read-only)</div>
+          <pre className="whitespace-pre-wrap text-xs text-slate-800">{contextText}</pre>
         </div>
       </section>
 
-      {/* Selection box (Type + Artefact) */}
-      <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <h2 className="mb-3 text-lg font-semibold">Select artefact</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          {/* Artefact type */}
-          <div>
-            <div className="mb-1 text-sm text-slate-700">Artefact type</div>
-            <select
-              className="w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-              value={kind}
-              onChange={e => {
-                setKind(e.target.value as Kind);
-                setSelectedId("");
-              }}
-            >
-              <option value="epic">Epic</option>
-              <option value="story">Story</option>
-              <option value="task">Task</option>
-            </select>
-          </div>
-
-          {/* Artefact selector (fully respects filters) */}
-          <div className="md:col-span-2">
-            <div className="mb-1 text-sm text-slate-700">Artefact</div>
-            <select
-              className="w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-              value={selectedId}
-              onChange={e => setSelectedId(e.target.value)}
-            >
-              <option value="">—</option>
-              {candidates.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
-            </select>
-            <div className="mt-1 text-xs text-slate-500">
-              Showing {candidates.length} {kind}{candidates.length === 1 ? "" : "s"} (filters applied)
-            </div>
-
-            {/* Selected context panel */}
-            {selectedId && (
-              <div className="w-full mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
-                <div className="mb-1 text-sm text-slate-700">Selected {kind} context</div>
-                <div className="text-slate-900 font-semibold">{selectedLabel || "(untitled)"}</div>
-                <p className="mt-2 whitespace-pre-wrap text-sm text-slate-700">
-                  {selectedDescription || "No description provided for this artefact."}
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
-      </section>
-
-      {/* Feedback editors */}
+      {/* Feedback */}
       <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="grid gap-4 md:grid-cols-2">
           <div>
@@ -329,22 +366,6 @@ export default function RetrospectivePage() {
               onChange={e => setHuman(e.target.value)}
               placeholder="Add actionable critique, constraints, risks, priorities…"
             />
-            <div className="mt-2 flex gap-2">
-              <button
-                onClick={saveHuman}
-                disabled={!runId || !selectedId || busy}
-                className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-indigo-500 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1"
-              >
-                Save human feedback
-              </button>
-              <button
-                onClick={genAI}
-                disabled={!runId || !selectedId || busy}
-                className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 hover:border-slate-400 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-slate-300 focus:ring-offset-1"
-              >
-                Generate AI feedback
-              </button>
-            </div>
           </div>
           <div>
             <div className="mb-1 text-sm font-semibold">AI feedback</div>
@@ -354,17 +375,36 @@ export default function RetrospectivePage() {
               onChange={e => setAI(e.target.value)}
               placeholder="AI synthesis will appear here…"
             />
-            <div className="mt-2">
-              <button
-                onClick={() => patchFeedback(runId, kind, selectedId, { ai })}
-                disabled={!runId || !selectedId || busy}
-                className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-indigo-500 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1"
-              >
-                Save AI feedback
-              </button>
-            </div>
           </div>
         </div>
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            onClick={saveFeedback}
+            disabled={!runId || busy || (kind === "story_tasks" && !selectedStoryId)}
+            className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-indigo-500 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1"
+          >
+            Save Human feedback
+          </button>
+
+          <button
+            onClick={genAI}
+            disabled={!runId || busy || (kind === "story_tasks" && !selectedStoryId)}
+            className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 hover:border-slate-400 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-slate-300 focus:ring-offset-1"
+          >
+            Generate & Save AI feedback
+          </button>
+
+          <button
+            onClick={commitSelectedAsExemplar}
+            disabled={!runId || busy || (kind === "story_tasks" && !selectedStoryId)}
+            className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 hover:border-slate-400 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-slate-300 focus:ring-offset-1"
+            title="Push an exemplar to the RAG store for this artefact type"
+          >
+            Commit exemplar to RAG store
+          </button>
+        </div>
+
         {msg && <div className="mt-3 text-sm text-slate-600">{msg}</div>}
       </section>
     </div>

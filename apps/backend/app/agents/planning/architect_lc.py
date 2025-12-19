@@ -22,15 +22,21 @@ _SYSTEM = (
     "• Keep scope tight: implement **only** what appears in *Vision features*; no scope creep.\n"
     "• Prefer a single process and simple HTTP/REST patterns unless *Constraints* explicitly require more.\n"
     "• Be concise: bullets, **one sentence per bullet**, no marketing language.\n"
+    "\nEXEMPLAR / FEEDBACK HINTS (optional):\n"
+    "• The exemplar may contain prior feedback (e.g., 'Human:' / 'AI:' notes, critiques, anti-patterns).\n"
+    "• Treat that feedback as guidance on what to improve/avoid (structure, completeness, specificity, scope control).\n"
+    "• Do NOT copy exemplar content. Do NOT quote or repeat any feedback text in your output.\n"
+    "• Apply the feedback implicitly by producing a better technical solution for THIS requirement.\n"
+    "--- EXEMPLAR START ---\n{exemplar}\n--- EXEMPLAR END ---\n"
     "\nOUTPUT (must match schema):\n"
     "• Stack — name the minimal technologies **as aligned to repo conventions**; if assumed, say \"(assumption)\".\n"
     "• Modules — high-level components/services and their purpose (no file paths).\n"
     "• Interfaces — per module, list key functions as name -> signature (language-agnostic where possible).\n"
     "• Data Model — required tables/entities with essential columns/fields only.\n"
-    "• Key Decisions — one-sentence rationale per decision; include any assumptions and open questions.\n"
-    "\nCONTEXT:\n"
-    "Incorporate prior feedback if provided to improve the artifact.\n"
-    "--- PRIOR FEEDBACK START ---\n{feedback_context}\n--- PRIOR FEEDBACK END ---\n"
+    "• Key Decisions — one-sentence rationale per decision; include assumptions and open questions.\n"
+    "\nQUALITY BAR\n"
+    "• Decisions must be actionable and specific, not generic (avoid 'use best practices').\n"
+    "• Avoid cost bloat: no unnecessary infra/services; prefer the simplest architecture that fits the requirement.\n"
 )
  
 _PROMPT = ChatPromptTemplate.from_messages(
@@ -42,7 +48,10 @@ _PROMPT = ChatPromptTemplate.from_messages(
             "Vision features: {features}\n"
             "Constraints (optional): {constraints}\n"
             "Non-functionals (optional): {nfr}\n"
-            "Repository conventions (optional): {repo_conventions}"
+            "Repository conventions (optional): {repo_conventions}\n"
+            "\n"
+            "Checklist before you answer: MVP-only, no file paths, no tool bloat, assumptions labelled.\n"
+            "Return JSON ONLY that matches the TechnicalSolutionDraft schema."
         ),
     ]
 )
@@ -52,7 +61,7 @@ def make_chain(llm: BaseChatModel, **knobs: Any) -> Runnable:
     Map {title, features, constraints, nfr, repo_conventions?} -> TechnicalSolutionDraft.
     The architect follows repo conventions when provided; otherwise marks choices as assumptions.
     """
-    defaults: Dict[str, Any] = {"repo_conventions": ""}
+    defaults: Dict[str, Any] = {"repo_conventions": "", "exemplar": ""}
     if knobs:
         defaults.update(knobs)
     prompt = _PROMPT.partial(**defaults)
