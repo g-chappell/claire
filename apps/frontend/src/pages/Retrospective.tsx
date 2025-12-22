@@ -1,6 +1,6 @@
 // apps/frontend/src/pages/Retrospective.tsx
 import { useEffect, useState } from "react";
-import { BASE, getPlan as loadPlan, getVisionSolution, patchPlanFeedback, synthesizePlanAIFeedback, commitMemory, getPlanFeedback, type PlanArtifactKind } from "../lib/api";
+import { BASE, getPlan as loadPlan, getVisionSolution, patchPlanFeedback, synthesizePlanAIFeedback, commitSelectedFeedbackExemplar, getPlanFeedback, type PlanArtifactKind } from "../lib/api";
 
 type RunLite = { id: string; title?: string };
 type Epic = {
@@ -258,47 +258,25 @@ export default function RetrospectivePage() {
     }
   }
 
-  async function commitSelectedAsExemplar() {
-    if (!runId) return;
-    setBusy(true); setMsg(null);
-    try {
-      const storyTitle =
-        kind === "story_tasks"
-          ? (stories.find(s => s.id === selectedStoryId)?.title || selectedStoryId || "(unknown story)")
-          : "";
-      // Build exemplar text: context + feedback (this is what “good looks like”)
-      const exemplar = [
-        `TYPE: ${kind}`,
-        "",
-        "CONTEXT:",
-        contextText || "(none)",
-        "",
-        "HUMAN FEEDBACK:",
-        human?.trim() ? human.trim() : "(none)",
-        "",
-        "AI FEEDBACK:",
-        ai?.trim() ? ai.trim() : "(none)",
-        "",
-      ].join("\n");
+async function commitSelectedAsExemplar() {
+  if (!runId) return;
+  setBusy(true); setMsg(null);
 
-      const out = await commitMemory({
-        run_id: runId,
-        artifacts: [{
-          type: kind as any,
-          title: kind === "story_tasks" ? `Story Tasks — ${storyTitle}` : undefined,
-          story_id: kind === "story_tasks" ? selectedStoryId : undefined, // ✅ add this
-          text: exemplar
-        }],
-      });
+  try {
+    const out = await commitSelectedFeedbackExemplar(
+      runId,
+      kind,
+      kind === "story_tasks" ? selectedStoryId : undefined
+    );
 
-      const del = typeof out.deleted === "number" ? `, deleted ${out.deleted}` : "";
-      setMsg(`Committed exemplar to RAG (${kind}${del}, +${out.added}) ✅`);
-    } catch (e: any) {
-      setMsg(`Commit failed: ${e?.message || e}`);
-    } finally {
-      setBusy(false);
-    }
+    const del = typeof out.deleted === "number" ? out.deleted : 0;
+    setMsg(`Committed exemplar (${out.added}, deleted ${del}) ✅`);
+  } catch (e: any) {
+    setMsg(`Commit failed: ${e?.message || e}`);
+  } finally {
+    setBusy(false);
   }
+}
 
   // ---------------- Render ----------------
   return (

@@ -187,7 +187,7 @@ def post_plan(
                     q_title = (story.title or "").strip()
                     q_desc = (story.description or "").strip()
 
-                    ex, _hits = build_exemplar_context(
+                    ex, hits = build_exemplar_context(
                         request,
                         query_title=q_title,
                         query_description=q_desc,
@@ -198,6 +198,27 @@ def post_plan(
                         prompt_context_mode=prompt_mode,
                         phase="planning",
                     )
+
+                    sim = None
+                    hit_id = "n/a"
+                    if hits:
+                        hit_id = getattr(hits[0], "id", "") or "n/a"
+                        try:
+                            sim = float((hits[0].meta or {}).get("debug_similarity"))  # type: ignore[arg-type]
+                        except Exception:
+                            sim = None
+
+                    found = bool((ex or "").strip())
+                    logger.info(
+                        "RAG_STORY_TASKS_MATCH run=%s story_id=%s story_title=%s found=%s sim=%s hit_id=%s",
+                        run_id,
+                        getattr(story, "id", "") or "",
+                        (story.title or "")[:120],
+                        found,
+                        f"{sim:.4f}" if sim is not None else "n/a",
+                        hit_id,
+                    )
+
                     picked = (ex or "").strip() or fallback_story_tasks
                     tasks_exemplar_cache[key] = picked
                     return picked
@@ -605,7 +626,7 @@ def post_finalise(
             q_title = (story.title or "").strip()
             q_desc = (story.description or "").strip()
 
-            ex, _hits = build_exemplar_context(
+            ex, hits = build_exemplar_context(
                 request,
                 query_title=q_title,
                 query_description=q_desc,
@@ -616,6 +637,27 @@ def post_finalise(
                 prompt_context_mode=prompt_mode,
                 phase="planning",
             )
+
+            sim = None
+            hit_id = "n/a"
+            if hits:
+                hit_id = getattr(hits[0], "id", "") or "n/a"
+                try:
+                    sim = float((hits[0].meta or {}).get("debug_similarity"))  # type: ignore[arg-type]
+                except Exception:
+                    sim = None
+
+            found = bool((ex or "").strip())
+            logger.info(
+                "RAG_STORY_TASKS_MATCH run=%s story_id=%s story_title=%s found=%s sim=%s hit_id=%s",
+                run_id,
+                getattr(story, "id", "") or "",
+                (story.title or "")[:120],
+                found,
+                f"{sim:.4f}" if sim is not None else "n/a",
+                hit_id,
+            )
+
             picked = (ex or "").strip() or fallback_story_tasks
             tasks_exemplar_cache[key] = picked
             return picked

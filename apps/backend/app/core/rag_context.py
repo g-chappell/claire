@@ -16,6 +16,22 @@ logger = logging.getLogger(__name__)
 MAX_SNIPPET_CHARS = 400          # per artifact
 MAX_CONTEXT_CHARS = 2000         # total across all artifacts
 
+# Hard floor to prevent weak/irrelevant matches polluting prompts
+MIN_MATCH_SIMILARITY_FLOOR = 0.35
+
+def _safe_float(v: Any) -> Optional[float]:
+    try:
+        if v is None:
+            return None
+        return float(v)
+    except Exception:
+        return None
+
+def _hit_sim(h: MemoryDoc) -> Optional[float]:
+    meta = getattr(h, "meta", None) or {}
+    # ChromaMemoryStore sets debug_similarity as a string.
+    return _safe_float(meta.get("debug_similarity") or meta.get("similarity") or meta.get("score"))
+
 def _trim(s: str, n: int) -> str:
     s = (s or "").strip()
     return (s[: n - 1] + "…") if len(s) > n else s
@@ -80,7 +96,7 @@ def build_rag_context(
     fetch_k = (top_k or settings.RAG_TOP_K) * max(1, settings.RAG_OVERFETCH)
 
     logger.info(
-        "RAG_CTX_QUERY phase=%s run=%s types=%s top_k=%s fetch_k=%s min_sim=%s q_len=%d q_sha1=%s q_prev=%s",
+        "RAG_CTX_SEARCH phase=%s run=%s types=%s top_k=%s fetch_k=%s min_sim=%s q_len=%d q_sha1=%s",
         phase,
         run_id,
         type_list,
@@ -89,24 +105,67 @@ def build_rag_context(
         settings.RAG_MIN_SIMILARITY,
         len(query),
         _sha1(query),
-        _preview(query, 240),
     )
-    logger.info("RAG_CTX_WHERE where=%s", where)
+
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug("RAG_CTX_QUERY_PREVIEW q_prev=%s", _preview(query, 240))
+        logger.debug("RAG_CTX_WHERE where=%s", where)
+
+    # Apply a hard floor so weak matches never enter prompts.
+    min_match = max(float(getattr(settings, "RAG_MIN_SIMILARITY", 0.0) or 0.0), MIN_MATCH_SIMILARITY_FLOOR)
 
     start = time.time()
-    hits = store.search(
+    candidates = store.search(
         query=query,
         top_k=fetch_k,
         where=where,
-        min_similarity=settings.RAG_MIN_SIMILARITY,
+        # IMPORTANT: fetch without filtering so we can log best score even if rejected
+        min_similarity=None,
     )
+
+    # Exclude current run docs (post-filter for store compatibility)
+    if run_id:
+        candidates = [h for h in candidates if str((h.meta or {}).get("run_id", "")) != str(run_id)]
+
+    # Apply similarity threshold filtering ourselves
+    hits: List[MemoryDoc] = []
+    best_sim: Optional[float] = None
+    for h in candidates:
+        sim = _hit_sim(h)
+        if sim is not None:
+            if best_sim is None or sim > best_sim:
+                best_sim = sim
+            if sim < min_match:
+                continue
+        hits.append(h)
+
     end = time.time()
 
-    logger.info("RAG: %s hits for query", len(hits))
-    for h in hits[:5]:
-        label = h.meta.get("req_title") or h.meta.get("title") or ""
-        logger.info("RAG hit: [%s] %s", h.meta.get("type"), label)
-        logger.info("RAG hit preview: id=%s len=%d prev=%s", h.id, len(h.text or ""), _preview(h.text or "", 240))
+    elapsed_ms = int((end - start) * 1000)
+    logger.info(
+        "RAG_CTX_RESULT phase=%s run=%s candidates=%d hits=%d best_sim=%s min_match=%s elapsed_ms=%d",
+        phase,
+        run_id,
+        len(candidates),
+        len(hits),
+        f"{best_sim:.4f}" if best_sim is not None else "n/a",
+        f"{min_match:.2f}",
+        elapsed_ms,
+    )
+
+    if logger.isEnabledFor(logging.DEBUG):
+        for h in hits[:5]:
+            meta = h.meta or {}
+            label = meta.get("req_title") or meta.get("title") or ""
+            logger.debug(
+                "RAG_CTX_HIT type=%s title=%s id=%s sim=%s dist=%s",
+                meta.get("type"),
+                label,
+                h.id,
+                meta.get("debug_similarity"),
+                meta.get("debug_distance"),
+            )
+            logger.debug("RAG_CTX_HIT_PREVIEW len=%d prev=%s", len(h.text or ""), _preview(h.text or "", 240))
 
     if not hits:
         # Even with zero hits, we still log the tool metric.
@@ -124,7 +183,10 @@ def build_rag_context(
                     "prompt_context_mode": prompt_context_mode,
                     "top_k": top_k or settings.RAG_TOP_K,
                     "types": type_list,
+                    "n_candidates": len(candidates) if "candidates" in locals() else 0,
                     "n_hits": 0,
+                    "min_match_similarity": min_match if "min_match" in locals() else None,
+                    "best_similarity": best_sim if "best_sim" in locals() else None,
                 },
             )
         except Exception:
@@ -162,7 +224,10 @@ def build_rag_context(
                 "prompt_context_mode": prompt_context_mode,
                 "top_k": top_k or settings.RAG_TOP_K,
                 "types": type_list,
+                "n_candidates": len(candidates),
                 "n_hits": len(hits),
+                "min_match_similarity": min_match,
+                "best_similarity": best_sim,
             },
         )
     except Exception:
@@ -218,61 +283,72 @@ def build_exemplar_context(
 
     query = f"{(query_title or '').strip()}\n\n{(query_description or '').strip()}".strip()
     where: Dict[str, Any] = {"type": artifact_type}
-    if run_id:
-        # prevent self-retrieval / leakage into the same run
-        where["run_id"] = {"$ne": str(run_id)}
+    # Do NOT use $ne in where; filter post-retrieval for compatibility
 
     fetch_k = max(1, top_k) * max(1, settings.RAG_OVERFETCH)
 
-    # ---- DEBUG START (TEMP) ----
     logger.info(
-        "RAG_EX_QUERY phase=%s run=%s type=%s top_k=%s fetch_k=%s title_len=%d desc_len=%d q_len=%d q_sha1=%s title_prev=%s desc_prev=%s",
+        "RAG_EX_SEARCH phase=%s run=%s type=%s top_k=%s fetch_k=%s min_sim=%s q_len=%d q_sha1=%s",
         phase,
         run_id,
         artifact_type,
         top_k,
         fetch_k,
-        len((query_title or "").strip()),
-        len((query_description or "").strip()),
+        settings.RAG_MIN_SIMILARITY,
         len(query),
         _sha1(query),
-        _preview((query_title or "").strip(), 180),
-        _preview((query_description or "").strip(), 180),
     )
-    logger.info("RAG_EX_WHERE where=%s", where)
 
-    where_no_run = {"type": artifact_type}
-    hits_no_run = store.search(
-        query=query,
-        top_k=fetch_k,
-        where=where_no_run,
-        min_similarity=None,  # debug: show what's actually in the store
-    )
-    logger.info("RAG_EX_DEBUG type=%s hits_no_run=%d", artifact_type, len(hits_no_run))
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug("RAG_EX_QUERY_PREVIEW title_prev=%s", _preview((query_title or "").strip(), 180))
+        logger.debug("RAG_EX_QUERY_PREVIEW desc_prev=%s", _preview((query_description or "").strip(), 180))
+        logger.debug("RAG_EX_WHERE where=%s", where)
 
-    for h in (hits_no_run[:3] if hits_no_run else []):
-        logger.info(
-            "RAG_EX_DEBUG sample_meta_keys=%s meta=%s",
-            list((h.meta or {}).keys()),
-            (h.meta or {}),
-        )
-        logger.info("RAG_EX_DEBUG hit_preview id=%s len=%d prev=%s", h.id, len(h.text or ""), _preview(h.text or "", 240))
-    # ---- DEBUG END (TEMP) ----
+    min_match = max(float(getattr(settings, "RAG_MIN_SIMILARITY", 0.0) or 0.0), MIN_MATCH_SIMILARITY_FLOOR)
 
     start = time.time()
-    hits = store.search(
+    candidates = store.search(
         query=query,
         top_k=fetch_k,
         where=where,
-        min_similarity=None,  # exemplar mode: don't drop top-1 due to threshold
+        # IMPORTANT: do not pre-filter; we want to log best score even when rejected
+        min_similarity=None,
     )
+    if run_id:
+        candidates = [h for h in candidates if str((h.meta or {}).get("run_id", "")) != str(run_id)]
     end = time.time()
 
     exemplar = ""
     picked: List[MemoryDoc] = []
-    if hits:
-        picked = [hits[0]]
-        exemplar = _trim(getattr(hits[0], "text", "") or "", MAX_EXEMPLAR_CHARS)
+
+    best_sim: Optional[float] = None
+    best_id: str = ""
+    best_title: str = ""
+
+    if candidates:
+        h0 = candidates[0]
+        sim0 = _hit_sim(h0)
+        best_sim = sim0
+        best_id = getattr(h0, "id", "") or ""
+        best_title = str((getattr(h0, "meta", None) or {}).get("title") or "")
+
+        # Reject weak match
+        if sim0 is None or sim0 >= min_match:
+            picked = [h0]
+            exemplar = _trim(getattr(h0, "text", "") or "", MAX_EXEMPLAR_CHARS)
+
+        logger.info(
+        "RAG_EX_PICK phase=%s run=%s type=%s found=%s best_sim=%s min_match=%s best_id=%s best_title=%s candidates=%d",
+        phase,
+        run_id,
+        artifact_type,
+        bool(exemplar),
+        f"{best_sim:.4f}" if best_sim is not None else "n/a",
+        f"{min_match:.2f}",
+        best_id or "n/a",
+        (best_title[:120] + "…") if len(best_title) > 120 else (best_title or "n/a"),
+        len(candidates),
+    )
 
     try:
         log_tool_call(
@@ -288,7 +364,10 @@ def build_exemplar_context(
                 "prompt_context_mode": prompt_context_mode,
                 "artifact_type": artifact_type,
                 "top_k": top_k,
-                "n_hits": len(hits),
+                "n_candidates": len(candidates),
+                "n_hits": len(candidates),  # raw returned by store (pre-threshold)
+                "min_match_similarity": min_match,
+                "best_similarity": best_sim,
                 "returned": 1 if exemplar else 0,
             },
         )

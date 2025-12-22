@@ -221,32 +221,20 @@ class DesignNoteDraft(LLMModel):
             out.append(k)
         return out
 
-class TaskDraft(LLMModel):
-    story_title: str
-    items: List[str] = Field(default_factory=list)
-
-    @field_validator("items", mode="before")
-    @classmethod
-    def _coerce_items(cls, v):
-        if v is None:
-            return []
-        if isinstance(v, list):
-            return [str(x).strip() for x in v if str(x).strip()]
-        if isinstance(v, str):
-            parts = [p.strip(" -*\n\r\t") for p in v.split("\n") if p.strip()]
-            return parts or [v.strip()]
-        return [str(v).strip()]
-
-    @field_validator("items")
-    @classmethod
-    def _cap_items(cls, v):
-        return (v or [])[:MAX_TASKS_PER_STORY]
-    priority_rank: int = Field(..., ge=1)
+class TaskItemDraft(LLMModel):
+    title: str
+    description: str = ""
+    priority_rank: int = Field(1, ge=1)
     depends_on: list[str] = Field(default_factory=list)
+
+    @field_validator("title", "description")
+    @classmethod
+    def _trim(cls, v): return _strip(v)
+
     @field_validator("priority_rank", mode="before")
     @classmethod
     def _prio(cls, v):
-        return _coerce_priority(v)
+        return _coerce_priority(v) or 1
 
     @field_validator("depends_on", mode="before")
     @classmethod
@@ -257,6 +245,52 @@ class TaskDraft(LLMModel):
     @classmethod
     def _deps_after(cls, v):
         return _dedupe_depends(v)
+
+
+class TaskDraft(LLMModel):
+    # Per-story task bundle (one LLM call per story)
+    story_title: str
+    items: List[TaskItemDraft] = Field(default_factory=list)
+
+    @field_validator("story_title")
+    @classmethod
+    def _trim_story_title(cls, v): return _strip(v)
+
+    @field_validator("items", mode="before")
+    @classmethod
+    def _coerce_items(cls, v):
+        """
+        Back-compat:
+        - If model returns a list of strings, convert to TaskItemDraft(title=...).
+        - If it returns a multiline string, split into titles.
+        - If it returns list[dict], pass through.
+        """
+        if v is None:
+            return []
+        if isinstance(v, list):
+            out = []
+            for x in v:
+                if isinstance(x, dict):
+                    out.append(x)
+                else:
+                    t = str(x).strip()
+                    if t:
+                        out.append({"title": t, "description": "", "priority_rank": 1, "depends_on": []})
+            return out
+        if isinstance(v, str):
+            s = v.strip()
+            if not s:
+                return []
+            parts = [p.strip(" -*\n\r\t") for p in s.split("\n") if p.strip()]
+            return [{"title": p, "description": "", "priority_rank": 1, "depends_on": []} for p in parts]
+        # scalar fallback
+        s = str(v).strip()
+        return [{"title": s, "description": "", "priority_rank": 1, "depends_on": []}] if s else []
+
+    @field_validator("items")
+    @classmethod
+    def _cap_items(cls, v):
+        return (v or [])[:MAX_TASKS_PER_STORY]
 
 class TechWritingBundleDraft(LLMModel):
     notes: List[DesignNoteDraft] = Field(default_factory=list)
