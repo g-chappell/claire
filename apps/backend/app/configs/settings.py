@@ -56,11 +56,16 @@ class _Common:
     # RAG memory (skeleton only)
     RAG_MODE: str = "off"           # off | manual | auto_approved
     RAG_STORE_PATH: str = "./data/vector"
-    RAG_COLLECTION: str = "claire-dev"
+    RAG_COLLECTION: str = "claire-cosine"
     RAG_TOP_K: int = 6
     USE_RAG: bool = False
     RAG_MIN_SIMILARITY: float = 0.35
     RAG_OVERFETCH: int = 2
+        # Per-artefact similarity thresholds (stricter for story-level guidance)
+    RAG_MIN_SIM_PV: float = 0.40
+    RAG_MIN_SIM_TS: float = 0.40
+    RAG_MIN_SIM_RA_PLAN: float = 0.45
+    RAG_MIN_SIM_STORY_TASKS: float = 0.55
 
     # Serena / MCP
     SERENA_TRANSPORT: str = "stdio"    # "stdio" | "streamable_http" | "sse"

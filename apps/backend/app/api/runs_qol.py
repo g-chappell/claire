@@ -62,6 +62,10 @@ class StoryOut(BaseModel):
     description: str = ""
     priority_rank: int
 
+class CommitFeedbackExemplarIn(BaseModel):
+    kind: PlanKind
+    story_id: Optional[str] = None  # required when kind == "story_tasks"
+
 def _has_attr(model, name: str) -> bool:
     return hasattr(model, name) and name in model.__table__.columns
 
@@ -383,9 +387,11 @@ def commit_exemplars(
     import json, uuid
 
     def _meta(doc_type: str, title: str, **extra: str) -> dict[str, str]:
+        # Store OUTPUT exemplars under distinct types so the planner doesn't retrieve them as guidance
+        doc_type_out = f"{doc_type}_output"
         m: dict[str, str] = {
             "run_id": str(run_id),
-            "type": str(doc_type),
+            "type": str(doc_type_out),
             "title": str(title),
             "req_title": str(req_title),
             "phase": "planning",
@@ -409,7 +415,7 @@ def commit_exemplars(
                 text=pv_text,
                 meta=_meta(
                     "product_vision",
-                    f"{req_title} — Product Vision" if req_title else "Product Vision",
+                    req_title or "Product Vision",
                 ),
                 embed_text=run_embed_text,
             )
@@ -424,7 +430,7 @@ def commit_exemplars(
                 text=ts_text,
                 meta=_meta(
                     "technical_solution",
-                    f"{req_title} — Technical Solution" if req_title else "Technical Solution",
+                    req_title or "Technical Solution",
                 ),
                 embed_text=run_embed_text,
             )
@@ -463,7 +469,7 @@ def commit_exemplars(
                 text=ra_text,
                 meta=_meta(
                     "ra_plan",
-                    f"{req_title} — Epics & Stories (RA Plan)" if req_title else "RA Plan",
+                    req_title or "RA Plan",
                 ),
                 embed_text=run_embed_text,
             )
@@ -502,7 +508,7 @@ def commit_exemplars(
                 text=st_text,
                 meta=_meta(
                     "story_tasks",
-                    f"{req_title} — {s.title} — Story Tasks" if req_title else f"{s.title} — Story Tasks",
+                    s.title.strip() or "Story Tasks",
                     story_id=str(s.id),
                     story_title=str(s.title),
                 ),
@@ -516,9 +522,13 @@ def commit_exemplars(
     store = request.app.state.memory
     deleted_total = 0
     for d in docs:
-        where: dict = {"type": d.meta["type"], "phase": "planning"}
-        # NOTE: don't pin to run_id so exemplars can generalize across runs
-        if d.meta["type"] == "story_tasks":
+        where: dict = {
+            "run_id": str(run_id),
+            "type": d.meta["type"],
+            "phase": "planning",
+        }
+        # If you ever store story_tasks_output, keep overwrite within run
+        if d.meta["type"].startswith("story_tasks") and "story_id" in d.meta:
             where["story_id"] = d.meta["story_id"]
         deleted_total += int(store.delete_where(where))
 
@@ -528,16 +538,25 @@ def commit_exemplars(
 @router.post("/runs/{run_id}/retrospective/commit-feedback-exemplars")
 def commit_feedback_exemplars(
     run_id: str,
+    body: CommitFeedbackExemplarIn,
     request: Request,
     db: Session = Depends(get_db),
     settings = Depends(get_settings),
 ):
     """
-    Commit *feedback-as-exemplars* into the RAG store at the same artefact levels the planner retrieves.
-    Stores FEEDBACK ONLY in MemoryDoc.text, and uses requirement/story text as embed_text.
+    Commit ONE selected feedback-as-exemplar into the RAG store.
+    - body.kind selects which artefact level
+    - body.story_id required when kind == "story_tasks"
+    Stores FEEDBACK ONLY in MemoryDoc.text.
+    Uses requirement/story text as embed_text.
     """
     if settings.RAG_MODE.lower() == "off":
         raise HTTPException(status_code=403, detail="RAG_MODE=off — ingestion disabled")
+
+    kind = body.kind
+    story_id = body.story_id if kind == "story_tasks" else None
+    if kind == "story_tasks" and not story_id:
+        raise HTTPException(status_code=400, detail="story_id is required when kind=story_tasks")
 
     # Requirement used for titles + similarity queries
     req_row = db.query(RequirementORM).filter_by(run_id=run_id).first()
@@ -550,8 +569,6 @@ def commit_feedback_exemplars(
     mf_data = dict(mf.data or {}) if mf and getattr(mf, "data", None) else {}
     exp_label = mf_data.get("experiment_label")
     prompt_mode = mf_data.get("prompt_context_mode")
-
-    import uuid
 
     def _meta(doc_type: str, title: str, **extra: str) -> dict[str, str]:
         m: dict[str, str] = {
@@ -569,92 +586,60 @@ def commit_feedback_exemplars(
             m[str(k)] = str(v)
         return m
 
-    def _plan_fb(kind: str, story_id: str | None = None) -> str:
-        row = (
-            db.query(PlanArtifactFeedbackORM)
-            .filter_by(run_id=run_id, kind=kind, story_id=story_id)
-            .first()
-        )
-        ai = (row.feedback_ai or "").strip() if row else ""
-        human = (row.feedback_human or "").strip() if row else ""
-        return ai or human
-
-    docs: list[MemoryDoc] = []
-
-    # --- PV (feedback only) ---
-    pv_fb = _plan_fb("product_vision", None)
-    if pv_fb:
-        docs.append(MemoryDoc(
-            id=f"{run_id}:product_vision:{uuid.uuid4().hex[:8]}",
-            text=pv_fb,
-            meta=_meta("product_vision", f"{req_title} — Product Vision" if req_title else "Product Vision"),
-            embed_text=run_embed_text,
-        ))
-
-    # --- TS (feedback only) ---
-    ts_fb = _plan_fb("technical_solution", None)
-    if ts_fb:
-        docs.append(MemoryDoc(
-            id=f"{run_id}:technical_solution:{uuid.uuid4().hex[:8]}",
-            text=ts_fb,
-            meta=_meta("technical_solution", f"{req_title} — Technical Solution" if req_title else "Technical Solution"),
-            embed_text=run_embed_text,
-        ))
-
-    # --- RA plan (feedback only) ---
-    ra_fb = _plan_fb("ra_plan", None)
-    if ra_fb:
-        docs.append(MemoryDoc(
-            id=f"{run_id}:ra_plan:{uuid.uuid4().hex[:8]}",
-            text=ra_fb,
-            meta=_meta("ra_plan", f"{req_title} — Epics & Stories (RA Plan)" if req_title else "RA Plan"),
-            embed_text=run_embed_text,
-        ))
-
-    # --- story_tasks (per story feedback only) ---
-    stories = (
-        db.query(StoryORM)
-        .filter(StoryORM.run_id == run_id)
-        .order_by(StoryORM.epic_id.asc(), StoryORM.priority_rank.asc())
-        .all()
+    # pull feedback (ai preferred, else human)
+    row = (
+        db.query(PlanArtifactFeedbackORM)
+        .filter_by(run_id=run_id, kind=kind, story_id=story_id)
+        .first()
     )
+    ai = (row.feedback_ai or "").strip() if row else ""
+    human = (row.feedback_human or "").strip() if row else ""
+    fb_text = ai or human
 
-    for s in stories:
-        sid = str(s.id)
-        fb = _plan_fb("story_tasks", sid)
-        if not fb:
-            continue
+    if not fb_text:
+        return {"ok": True, "added": 0, "deleted": 0, "detail": "no feedback found for selected artefact"}
 
-        story_embed = "\n\n".join(
-            [t for t in [(s.title or "").strip(), (s.description or "").strip()] if t]
-        ).strip() or run_embed_text
+    import uuid
 
-        docs.append(MemoryDoc(
-            id=f"{run_id}:story_tasks:{sid}:{uuid.uuid4().hex[:6]}",
-            text=fb,
+    # Title + embed_text rules
+    if kind == "story_tasks":
+        s = db.get(StoryORM, story_id)
+        if not s or s.run_id != run_id:
+            raise HTTPException(status_code=404, detail="Story not found for run")
+
+        story_title = (s.title or "").strip() or str(story_id)
+        story_desc = (s.description or "").strip()
+        embed_text = "\n\n".join([t for t in [story_title, story_desc] if t]).strip() or run_embed_text
+
+        doc = MemoryDoc(
+            id=f"{run_id}:story_tasks:{story_id}:{uuid.uuid4().hex[:6]}",
+            text=fb_text,
             meta=_meta(
                 "story_tasks",
-                f"{req_title} — {s.title} — Story Tasks" if req_title else f"{s.title} — Story Tasks",
-                story_id=sid,
-                story_title=str(s.title),
+                story_title,               # ✅ story title
+                story_id=str(story_id),
+                story_title=story_title,
             ),
-            embed_text=story_embed,
-        ))
+            embed_text=embed_text,         # ✅ story embed
+        )
+        where = {"run_id": str(run_id), "type": "story_tasks", "phase": "planning", "story_id": str(story_id)}
 
-    if not docs:
-        return {"ok": True, "added": 0, "detail": "no feedback found to commit"}
+    else:
+        # ✅ requirement title for PV/TS/RA
+        title = req_title.strip() or kind.replace("_", " ").title()
+        doc = MemoryDoc(
+            id=f"{run_id}:{kind}:{uuid.uuid4().hex[:8]}",
+            text=fb_text,
+            meta=_meta(kind, title),
+            embed_text=run_embed_text,     # ✅ requirement embed
+        )
+        where = {"run_id": str(run_id), "type": kind, "phase": "planning"}
 
-    # Overwrite exemplar set (global, not pinned to run_id)
     store = request.app.state.memory
-    deleted_total = 0
-    for d in docs:
-        where: dict = {"type": d.meta["type"], "phase": "planning"}
-        if d.meta["type"] == "story_tasks":
-            where["story_id"] = d.meta["story_id"]
-        deleted_total += int(store.delete_where(where))
+    deleted = int(store.delete_where(where))
+    store.add([doc])
 
-    store.add(docs)
-    return {"ok": True, "added": len(docs), "deleted": deleted_total}
+    return {"ok": True, "added": len([doc]), "deleted": deleted, "kind": kind, "story_id": story_id}
 
 @router.patch("/runs/{run_id}/plan-feedback/{kind}")
 def patch_plan_feedback(

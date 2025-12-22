@@ -116,12 +116,28 @@ class ChromaMemoryStore:
         ids: List[str] = [d.id for d in docs]
         documents: List[str] = [d.text for d in docs]  # stored payload (what gets injected)
         # keep metadata values as strings to match Dict[str, str]
-        metas_list: List[Dict[str, str]] = [d.meta for d in docs]
+        metas_list: List[Dict[str, str]] = []
+        embed_inputs: List[str] = []
 
-        # IMPORTANT: similarity is computed on embed_text when provided, otherwise on stored text.
-        embed_inputs: List[str] = [
-            (getattr(d, "embed_text", None) or d.text) for d in docs
-        ]
+        for d in docs:
+            stored_text = d.text or ""
+            embed_text = (d.embed_text if d.embed_text is not None else "")
+            used_embed = embed_text if embed_text.strip() else stored_text
+
+            # copy meta so we don't mutate caller data
+            md: Dict[str, str] = dict(d.meta or {})
+
+            # Debug: what did we embed vs what did we store?
+            md["debug_embed_source"] = "embed_text" if (embed_text.strip()) else "text"
+            md["debug_embed_len"] = str(len(used_embed))
+            md["debug_embed_sha1"] = hashlib.sha1(used_embed.encode("utf-8")).hexdigest()[:10]
+
+            md["debug_stored_len"] = str(len(stored_text))
+            md["debug_stored_sha1"] = hashlib.sha1(stored_text.encode("utf-8")).hexdigest()[:10]
+
+            metas_list.append(md)
+            embed_inputs.append(used_embed)
+
         embeds_list: List[List[float]] = self._embed(embed_inputs)
 
         # Light-weight debug so you can see experiment/run tags flowing through
@@ -175,22 +191,35 @@ class ChromaMemoryStore:
     
     def _distance_to_similarity(self, dist: float) -> float:
         """
-        Convert Chroma distance to an approximate cosine-similarity-like score.
+        Convert Chroma distance to a cosine-similarity-like score in [-1, 1].
 
-        With normalize_embeddings=True:
-        - cosine space: dist = 1 - cos_sim        => cos_sim = 1 - dist
-        - l2 space:     dist = ||u - v|| (unit)   => cos_sim = 1 - (dist^2)/2
+        Notes (with normalize_embeddings=True):
+        - cosine space: dist = 1 - cos_sim                  => cos_sim = 1 - dist
+        - l2 space in Chroma is typically SQUARED L2: dist = ||u - v||^2
+              For unit vectors: ||u - v||^2 = 2(1 - cos_sim) => cos_sim = 1 - dist/2
         """
-        space = getattr(self, "_space", "l2")
+        space = str(getattr(self, "_space", "l2") or "l2").lower()
+
+        if dist is None:
+            return 0.0
+
+        d = float(dist)
 
         if space == "cosine":
-            return 1.0 - dist
+            sim = 1.0 - d
+        elif space in ("l2", "euclidean"):
+            # Chroma commonly returns squared L2 distances for l2 space.
+            sim = 1.0 - (d / 2.0)
+        else:
+            # Fallback: treat like cosine distance
+            sim = 1.0 - d
 
-        if space in ("l2", "euclidean"):
-            return 1.0 - (dist * dist) / 2.0
-
-        # Fallback
-        return 1.0 - dist
+        # Clamp hard to [-1, 1] so logging/filters are sane even if upstream is odd.
+        if sim > 1.0:
+            sim = 1.0
+        elif sim < -1.0:
+            sim = -1.0
+        return sim
 
     def search(
         self,
@@ -241,6 +270,12 @@ class ChromaMemoryStore:
                 str(k): str(v)
                 for k, v in (metas0[i] if i < len(metas0) else {}).items()
             }
+
+            # Debug: surface ranking signals to callers
+            meta_dict["debug_space"] = str(getattr(self, "_space", "unknown"))
+            meta_dict["debug_distance"] = f"{float(dist):.6f}"
+            meta_dict["debug_similarity"] = f"{float(sim):.6f}"
+
             out.append(MemoryDoc(
                 id=_id,
                 text=docs0[i] if i < len(docs0) else "",

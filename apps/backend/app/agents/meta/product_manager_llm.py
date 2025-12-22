@@ -49,6 +49,10 @@ from app.core.metrics import log_llm_call
 import random
 import time
 import logging
+import os
+import json
+import threading
+from langchain_core.callbacks import BaseCallbackHandler
 
 try:
     from anthropic._exceptions import (
@@ -176,8 +180,119 @@ def _normalize_stack(items: Sequence[str]) -> set[str]:
                 norm.add(tok)
     return norm
 
+# --------------------------------------------------------------------------------------
+# Prompt tap (messages-only) -> file (no truncation)
+# --------------------------------------------------------------------------------------
 
+_prompt_tap_lock = threading.Lock()
 
+def _msg_to_text(m: Any) -> str:
+    """
+    Render a LangChain BaseMessage-ish object to readable text.
+    Content may be str or structured (list/dict); we dump structured as JSON.
+    """
+    role = getattr(m, "type", None) or getattr(m, "role", None) or m.__class__.__name__
+    content = getattr(m, "content", "")
+
+    if isinstance(content, str):
+        body = content
+    else:
+        try:
+            body = json.dumps(content, ensure_ascii=False, indent=2)
+        except Exception:
+            body = str(content)
+
+    # Some messages also carry extra kwargs (e.g., name/tool metadata)
+    extra = getattr(m, "additional_kwargs", None)
+    if extra:
+        try:
+            extra_txt = json.dumps(extra, ensure_ascii=False, indent=2)
+        except Exception:
+            extra_txt = str(extra)
+        if extra_txt and extra_txt != "{}":
+            body = f"{body}\n\n[additional_kwargs]\n{extra_txt}"
+
+    return f"{str(role).upper()}:\n{body}\n"
+
+class PromptTapToFile(BaseCallbackHandler):
+    """
+    Writes ONLY the prompt messages received by the model (system/human/tool etc)
+    to a run-scoped file. No other data.
+    """
+    def __init__(self, run_id: str, phase: str, agent: str, out_dir: str):
+        self.run_id = run_id or "unknown"
+        self.phase = phase
+        self.agent = agent
+        self.out_dir = out_dir or ".prompt_tap"
+
+    def _path(self) -> str:
+        d = os.path.join(self.out_dir, self.run_id)
+        os.makedirs(d, exist_ok=True)
+        # One file per agent+phase, appended across calls
+        fname = f"{self.phase}__{self.agent}.txt"
+        return os.path.join(d, fname)
+
+    def on_chat_model_start(self, serialized: dict, messages: list[list[Any]], **kwargs: Any) -> None:
+        p = self._path()
+        with _prompt_tap_lock:
+            with open(p, "a", encoding="utf-8") as f:
+                f.write("\n" + "=" * 100 + "\n")
+                f.write(f"RUN={self.run_id}  PHASE={self.phase}  AGENT={self.agent}\n")
+                f.write("=" * 100 + "\n\n")
+                # messages is List[List[BaseMessage]] (batch). Dump each item in the batch.
+                for i, prompt_msgs in enumerate(messages):
+                    if len(messages) > 1:
+                        f.write(f"\n--- BATCH ITEM {i} ---\n\n")
+                    for m in prompt_msgs:
+                        f.write(_msg_to_text(m))
+
+def _debug_cfg(run_id: str, phase: str, agent: str, base: Optional[RunnableConfig]) -> Optional[RunnableConfig]:
+    """
+    If enabled, attach a messages-only file dumper callback.
+
+    Toggle priority:
+      1) base.metadata["debug_prompts"] if present (per-run/per-request)
+      2) settings.DEBUG_LLM_PROMPTS
+      3) env DEBUG_LLM_PROMPTS (fallback)
+    """
+    enabled = False
+
+    # 1) Per-call override if caller sets it
+    if base is not None:
+        md = dict(getattr(base, "metadata", {}) or {})
+        if "debug_prompts" in md:
+            enabled = bool(md.get("debug_prompts"))
+
+    # 2) Settings flag (your existing pattern)
+    if not enabled:
+        enabled = bool(getattr(settings, "DEBUG_LLM_PROMPTS", False))
+
+    # 3) Environment fallback (easy quick toggle)
+    if not enabled:
+        enabled = os.getenv("DEBUG_LLM_PROMPTS", "").strip().lower() in {"1", "true", "yes", "on"}
+
+    if not enabled:
+        return base
+
+    out_dir = os.getenv("PROMPT_TAP_DIR", ".prompt_tap")
+    handler = PromptTapToFile(run_id=run_id, phase=phase, agent=agent, out_dir=out_dir)
+
+    if base is None:
+        return RunnableConfig(
+            callbacks=[handler],
+            metadata={"run_id": run_id, "phase": phase, "agent": agent},
+            tags=[],
+        )
+
+    callbacks = list(getattr(base, "callbacks", []) or [])
+    callbacks.append(handler)
+
+    metadata = dict(getattr(base, "metadata", {}) or {})
+    metadata.update({"run_id": run_id, "phase": phase, "agent": agent})
+
+    tags = list(getattr(base, "tags", []) or [])
+
+    return RunnableConfig(callbacks=callbacks, metadata=metadata, tags=tags)
 
 def _order_epics_and_stories(epics: List[Epic], stories: List[Story]) -> Tuple[List[Epic], List[Story]]:
     """
@@ -343,7 +458,7 @@ class ProductManagerLLM:
             ProductVisionDraft,
             self.vision_chain,
             vision_payload,
-            config=config,
+            config=_debug_cfg(run_id, "planning", "vision", config),
         )
         v_end = time.perf_counter()
 
@@ -385,7 +500,7 @@ class ProductManagerLLM:
             TechnicalSolutionDraft,
             self.arch_chain,
             arch_payload,
-            config=config,
+            config=_debug_cfg(run_id, "planning", "technical_solution", config),
         )
         a_end = time.perf_counter()
 
@@ -500,7 +615,7 @@ class ProductManagerLLM:
             RAPlanDraft,
             ra_chain,
             ra_inputs,
-            config=config,
+            config=_debug_cfg(run_id, "planning", "ra_plan", config),
         )
         ra_end = time.perf_counter()
 
@@ -680,9 +795,9 @@ class ProductManagerLLM:
                 qa_start = time.perf_counter()
                 qa_results_any = self.qa_chain.batch(
                     qa_inputs,
-                    config=config,
+                    config=_debug_cfg(run_id, "planning", "qa_planner", config),
                     max_concurrency=4,
-                ) or [None] * len(stories)
+                )
                 qa_end = time.perf_counter()
 
                 try:
@@ -735,7 +850,7 @@ class ProductManagerLLM:
                 TechWritingBundleDraft,
                 self.tw_notes_chain,
                 notes_payload,
-                config=config,
+                config=_debug_cfg(run_id, "planning", "tech_writer", config),
             )
             notes_end = time.perf_counter()
 
@@ -817,7 +932,7 @@ class ProductManagerLLM:
         task_drafts: List[TaskDraft] = []
         for inp, story_id in zip(task_inputs, task_story_ids):
             t_start = time.perf_counter()
-            td_any = _try_invoke(self.tw_tasks_chain, inp, config=config)
+            td_any = _try_invoke(self.tw_tasks_chain, inp, config=_debug_cfg(run_id, "planning", "tech_writer_tasks", config))
             t_end = time.perf_counter()
 
             # _try_invoke should already return a TaskDraft (via structured output)
@@ -846,11 +961,33 @@ class ProductManagerLLM:
             sid = story_id_by_title.get(title_key)
             if not sid:
                 continue
-            items = _sequence_to_list(getattr(td, "items", None))
-            for i, title in enumerate(items, start=1):
-                tid = _gen_id("T", requirement.get("id", "") + ":" + sid + f":{i}:{title}")
+
+            raw_items = getattr(td, "items", None) or []
+
+            # Normalize to dict-like items (TaskItemDraft or dict)
+            norm_items: List[dict] = []
+            for it in raw_items:
+                if isinstance(it, BaseModel):
+                    norm_items.append(it.model_dump())
+                elif isinstance(it, dict):
+                    norm_items.append(it)
+                else:
+                    t = str(it).strip()
+                    if t:
+                        norm_items.append({"title": t, "description": "", "priority_rank": 1, "depends_on": []})
+
+            # Sort by priority_rank (stable), then enumerate for deterministic fallback
+            norm_items.sort(key=lambda x: int(x.get("priority_rank") or 1))
+
+            for idx, it in enumerate(norm_items, start=1):
+                title = (str(it.get("title") or "")).strip()
+                if not title:
+                    continue
+                pr = int(it.get("priority_rank") or idx)
+
+                tid = _gen_id("T", requirement.get("id", "") + ":" + sid + f":{pr}:{title}")
                 tasks_by_story[sid].append(
-                    Task(id=tid, story_id=sid, title=title, order=i, status="todo")
+                    Task(id=tid, story_id=sid, title=title, order=pr, status="todo")
                 )
 
         for s in stories:

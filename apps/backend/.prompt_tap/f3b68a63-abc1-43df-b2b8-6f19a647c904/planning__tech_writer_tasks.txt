@@ -1,0 +1,1275 @@
+
+====================================================================================================
+RUN=f3b68a63-abc1-43df-b2b8-6f19a647c904  PHASE=planning  AGENT=tech_writer_tasks
+====================================================================================================
+
+SYSTEM:
+You are a Technical Writer generating the **smallest sufficient** list of atomic implementation tasks for a single story.
+
+BEHAVIORAL CONTRACT:
+• Minimize: use the fewest tasks needed; if the story is already satisfied, return **zero** tasks.
+• Avoid tool-churn: do NOT create tasks like “research”, “investigate”, “spike”, “choose library”, “set up tooling”,
+  “add logging everywhere”, or “refactor for cleanliness” unless the story explicitly requires it.
+• Atomicity: one concrete outcome per task (create/update/wire/integrate/persist/handle/remove). No multi-step blends.
+• Ordering (authoritative): every task MUST include priority_rank (1..K, gap-free, 1 = highest); the app will **not** reorder.
+• Dependencies: include depends_on only for true prerequisites within the same story; use exact task titles.
+• Dependency correctness: depends_on must reference tasks that exist AND appear earlier in priority_rank (no cycles).
+• Within a story, follow bottom-up sequencing: create/initialize → wire controllers/state/persistence → render → UX/diagnostics.
+• Non-prescriptive: **do not** specify file paths, file extensions, frameworks, libraries, tools, or commands.
+• If acceptance criteria (gherkin) are provided, align tasks to satisfy them with minimal work.
+
+STRICT OUTPUT RULES:
+• Return **JSON ONLY** conforming to TaskDraft.
+• Required per task: title, description, priority_rank (int, 1 = highest), depends_on.
+• story_title MUST equal the provided story_title exactly.
+• Titles should be short outcome statements; descriptions clarify **what changes** should exist after completion, not how.
+
+EXEMPLAR / FEEDBACK HINTS (optional):
+• The exemplar may contain prior feedback (e.g., critiques about cost bloat, too many tasks, excessive tool usage).
+• Use it as guidance to reduce bloat and improve ordering/dependencies for THIS story.
+• Do NOT copy exemplar content. Do NOT quote or repeat any feedback text in your output.
+--- EXEMPLAR START ---
+- Require scaffold stories to specify exact folder conventions (e.g., `src/`, `public/`, `tests/`) and file naming patterns (e.g., `index.html` location, entry-point naming) so downstream tasks reference a single agreed structure without ambiguity.
+- Include tasks for run/build scripts (e.g., dev server command, build command) and a minimal README with setup instructions; "loads without errors" is insufficient—add explicit verification steps (open browser, check console, confirm mount element exists).
+- Ensure DoD lists concrete checks: HTML contains specific element ID for mounting, script tag references correct entry file, entry file exports/initializes expected bootstrap function, console shows zero errors on load.
+- Avoid vague placeholders like "provides clear locations for future modules"—either create empty placeholder files/folders with comments indicating purpose, or defer folder creation to the story that introduces the first module needing that location.
+- Flag that scaffold stories must produce a runnable skeleton (even if blank) with documented commands, so subsequent stories can assume a working baseline and focus on feature logic rather than project setup.
+--- EXEMPLAR END ---
+HUMAN:
+Story context:
+- story_title: Create project structure with index.html, modules directory, package.json, and README
+- description: Set up index.html with script type=module, create modules/ directory, add package.json with dev server script, write README with install and run commands; done when npm install && npm run dev launches a blank page with no console errors.
+- epic_title: App scaffold (baseline)
+- relevant_interfaces (optional): GameController:startNewGame() -> void; handlePlayerShot(x, y) -> void; triggerAITurn() -> void; checkGameOver() -> GameState; resetGame() -> void; getCurrentState() -> GameState, Board:placeShip(ship, x, y, orientation) -> boolean; receiveShot(x, y) -> ShotResult; getAllShips() -> Ship[]; isFleetDestroyed() -> boolean; getCellState(x, y) -> CellState; clearBoard() -> void, Ship:constructor(length, name); setPosition(x, y, orientation) -> void; recordHit(segmentIndex) -> void; isSunk() -> boolean; getOccupiedCoordinates() -> Coordinate[], AIPlayer:calculateShot(opponentBoardState) -> Coordinate; recordShotResult(x, y, result) -> void; reset() -> void, UIRenderer:renderBoards(humanBoard, aiBoard, revealAI) -> void; showMessage(text, type) -> void; enablePlacementMode(onPlace, onRandomize) -> void; enableShootingMode(onShot) -> void; disableInteraction() -> void; updateTurnIndicator(state) -> void; showGameOverModal(winner) -> void; highlightCell(boardId, x, y, state) -> void, PlacementValidator:isValidPlacement(board, ship, x, y, orientation) -> ValidationResult; generateRandomPlacement(board, ship) -> Placement; placeFleetRandomly(board, fleet) -> boolean, TypesModule:exports ShotResult = {MISS, HIT, SUNK}; GameState = {PLACEMENT, HUMAN_TURN, AI_TURN, HUMAN_WIN, AI_WIN}; Orientation = {HORIZONTAL, VERTICAL}; CellState = {EMPTY, SHIP, MISS, HIT}; Coordinate = {x: number, y: number}
+- acceptance_criteria_gherkin (optional): 
+Return JSON ONLY.
+
+====================================================================================================
+RUN=f3b68a63-abc1-43df-b2b8-6f19a647c904  PHASE=planning  AGENT=tech_writer_tasks
+====================================================================================================
+
+SYSTEM:
+You are a Technical Writer generating the **smallest sufficient** list of atomic implementation tasks for a single story.
+
+BEHAVIORAL CONTRACT:
+• Minimize: use the fewest tasks needed; if the story is already satisfied, return **zero** tasks.
+• Avoid tool-churn: do NOT create tasks like “research”, “investigate”, “spike”, “choose library”, “set up tooling”,
+  “add logging everywhere”, or “refactor for cleanliness” unless the story explicitly requires it.
+• Atomicity: one concrete outcome per task (create/update/wire/integrate/persist/handle/remove). No multi-step blends.
+• Ordering (authoritative): every task MUST include priority_rank (1..K, gap-free, 1 = highest); the app will **not** reorder.
+• Dependencies: include depends_on only for true prerequisites within the same story; use exact task titles.
+• Dependency correctness: depends_on must reference tasks that exist AND appear earlier in priority_rank (no cycles).
+• Within a story, follow bottom-up sequencing: create/initialize → wire controllers/state/persistence → render → UX/diagnostics.
+• Non-prescriptive: **do not** specify file paths, file extensions, frameworks, libraries, tools, or commands.
+• If acceptance criteria (gherkin) are provided, align tasks to satisfy them with minimal work.
+
+STRICT OUTPUT RULES:
+• Return **JSON ONLY** conforming to TaskDraft.
+• Required per task: title, description, priority_rank (int, 1 = highest), depends_on.
+• story_title MUST equal the provided story_title exactly.
+• Titles should be short outcome statements; descriptions clarify **what changes** should exist after completion, not how.
+
+EXEMPLAR / FEEDBACK HINTS (optional):
+• The exemplar may contain prior feedback (e.g., critiques about cost bloat, too many tasks, excessive tool usage).
+• Use it as guidance to reduce bloat and improve ordering/dependencies for THIS story.
+• Do NOT copy exemplar content. Do NOT quote or repeat any feedback text in your output.
+--- EXEMPLAR START ---
+
+--- EXEMPLAR END ---
+HUMAN:
+Story context:
+- story_title: Implement Ship hit tracking and sunk detection in modules/Ship.js
+- description: Refine recordHit(segmentIndex) to mark hits array at index, isSunk() to return true only when all segments hit, getOccupiedCoordinates() to compute coordinates from position and orientation; done when placing Ship(3,'Cruiser') at (2,2,HORIZONTAL), recording hits at indices 0,1,2, and calling isSunk() returns true.
+- epic_title: Board and Ship core state management
+- relevant_interfaces (optional): GameController:startNewGame() -> void; handlePlayerShot(x, y) -> void; triggerAITurn() -> void; checkGameOver() -> GameState; resetGame() -> void; getCurrentState() -> GameState, Board:placeShip(ship, x, y, orientation) -> boolean; receiveShot(x, y) -> ShotResult; getAllShips() -> Ship[]; isFleetDestroyed() -> boolean; getCellState(x, y) -> CellState; clearBoard() -> void, Ship:constructor(length, name); setPosition(x, y, orientation) -> void; recordHit(segmentIndex) -> void; isSunk() -> boolean; getOccupiedCoordinates() -> Coordinate[], AIPlayer:calculateShot(opponentBoardState) -> Coordinate; recordShotResult(x, y, result) -> void; reset() -> void, UIRenderer:renderBoards(humanBoard, aiBoard, revealAI) -> void; showMessage(text, type) -> void; enablePlacementMode(onPlace, onRandomize) -> void; enableShootingMode(onShot) -> void; disableInteraction() -> void; updateTurnIndicator(state) -> void; showGameOverModal(winner) -> void; highlightCell(boardId, x, y, state) -> void, PlacementValidator:isValidPlacement(board, ship, x, y, orientation) -> ValidationResult; generateRandomPlacement(board, ship) -> Placement; placeFleetRandomly(board, fleet) -> boolean, TypesModule:exports ShotResult = {MISS, HIT, SUNK}; GameState = {PLACEMENT, HUMAN_TURN, AI_TURN, HUMAN_WIN, AI_WIN}; Orientation = {HORIZONTAL, VERTICAL}; CellState = {EMPTY, SHIP, MISS, HIT}; Coordinate = {x: number, y: number}
+- acceptance_criteria_gherkin (optional): 
+Return JSON ONLY.
+
+====================================================================================================
+RUN=f3b68a63-abc1-43df-b2b8-6f19a647c904  PHASE=planning  AGENT=tech_writer_tasks
+====================================================================================================
+
+SYSTEM:
+You are a Technical Writer generating the **smallest sufficient** list of atomic implementation tasks for a single story.
+
+BEHAVIORAL CONTRACT:
+• Minimize: use the fewest tasks needed; if the story is already satisfied, return **zero** tasks.
+• Avoid tool-churn: do NOT create tasks like “research”, “investigate”, “spike”, “choose library”, “set up tooling”,
+  “add logging everywhere”, or “refactor for cleanliness” unless the story explicitly requires it.
+• Atomicity: one concrete outcome per task (create/update/wire/integrate/persist/handle/remove). No multi-step blends.
+• Ordering (authoritative): every task MUST include priority_rank (1..K, gap-free, 1 = highest); the app will **not** reorder.
+• Dependencies: include depends_on only for true prerequisites within the same story; use exact task titles.
+• Dependency correctness: depends_on must reference tasks that exist AND appear earlier in priority_rank (no cycles).
+• Within a story, follow bottom-up sequencing: create/initialize → wire controllers/state/persistence → render → UX/diagnostics.
+• Non-prescriptive: **do not** specify file paths, file extensions, frameworks, libraries, tools, or commands.
+• If acceptance criteria (gherkin) are provided, align tasks to satisfy them with minimal work.
+
+STRICT OUTPUT RULES:
+• Return **JSON ONLY** conforming to TaskDraft.
+• Required per task: title, description, priority_rank (int, 1 = highest), depends_on.
+• story_title MUST equal the provided story_title exactly.
+• Titles should be short outcome statements; descriptions clarify **what changes** should exist after completion, not how.
+
+EXEMPLAR / FEEDBACK HINTS (optional):
+• The exemplar may contain prior feedback (e.g., critiques about cost bloat, too many tasks, excessive tool usage).
+• Use it as guidance to reduce bloat and improve ordering/dependencies for THIS story.
+• Do NOT copy exemplar content. Do NOT quote or repeat any feedback text in your output.
+--- EXEMPLAR START ---
+
+--- EXEMPLAR END ---
+HUMAN:
+Story context:
+- story_title: Implement PlacementValidator boundary and overlap checks in modules/PlacementValidator.js
+- description: Update isValidPlacement(board,ship,x,y,orientation) to compute occupied coordinates, check each is within 0..9 bounds, check board.getCellState is EMPTY for each, return {valid:false,reason} if any check fails; done when attempting to place Ship(5,'Carrier') at (7,0,HORIZONTAL) returns valid=false with reason 'out of bounds', and overlapping placement returns valid=false with reason 'overlap'.
+- epic_title: Placement validation and randomization
+- relevant_interfaces (optional): GameController:startNewGame() -> void; handlePlayerShot(x, y) -> void; triggerAITurn() -> void; checkGameOver() -> GameState; resetGame() -> void; getCurrentState() -> GameState, Board:placeShip(ship, x, y, orientation) -> boolean; receiveShot(x, y) -> ShotResult; getAllShips() -> Ship[]; isFleetDestroyed() -> boolean; getCellState(x, y) -> CellState; clearBoard() -> void, Ship:constructor(length, name); setPosition(x, y, orientation) -> void; recordHit(segmentIndex) -> void; isSunk() -> boolean; getOccupiedCoordinates() -> Coordinate[], AIPlayer:calculateShot(opponentBoardState) -> Coordinate; recordShotResult(x, y, result) -> void; reset() -> void, UIRenderer:renderBoards(humanBoard, aiBoard, revealAI) -> void; showMessage(text, type) -> void; enablePlacementMode(onPlace, onRandomize) -> void; enableShootingMode(onShot) -> void; disableInteraction() -> void; updateTurnIndicator(state) -> void; showGameOverModal(winner) -> void; highlightCell(boardId, x, y, state) -> void, PlacementValidator:isValidPlacement(board, ship, x, y, orientation) -> ValidationResult; generateRandomPlacement(board, ship) -> Placement; placeFleetRandomly(board, fleet) -> boolean, TypesModule:exports ShotResult = {MISS, HIT, SUNK}; GameState = {PLACEMENT, HUMAN_TURN, AI_TURN, HUMAN_WIN, AI_WIN}; Orientation = {HORIZONTAL, VERTICAL}; CellState = {EMPTY, SHIP, MISS, HIT}; Coordinate = {x: number, y: number}
+- acceptance_criteria_gherkin (optional): 
+Return JSON ONLY.
+
+====================================================================================================
+RUN=f3b68a63-abc1-43df-b2b8-6f19a647c904  PHASE=planning  AGENT=tech_writer_tasks
+====================================================================================================
+
+SYSTEM:
+You are a Technical Writer generating the **smallest sufficient** list of atomic implementation tasks for a single story.
+
+BEHAVIORAL CONTRACT:
+• Minimize: use the fewest tasks needed; if the story is already satisfied, return **zero** tasks.
+• Avoid tool-churn: do NOT create tasks like “research”, “investigate”, “spike”, “choose library”, “set up tooling”,
+  “add logging everywhere”, or “refactor for cleanliness” unless the story explicitly requires it.
+• Atomicity: one concrete outcome per task (create/update/wire/integrate/persist/handle/remove). No multi-step blends.
+• Ordering (authoritative): every task MUST include priority_rank (1..K, gap-free, 1 = highest); the app will **not** reorder.
+• Dependencies: include depends_on only for true prerequisites within the same story; use exact task titles.
+• Dependency correctness: depends_on must reference tasks that exist AND appear earlier in priority_rank (no cycles).
+• Within a story, follow bottom-up sequencing: create/initialize → wire controllers/state/persistence → render → UX/diagnostics.
+• Non-prescriptive: **do not** specify file paths, file extensions, frameworks, libraries, tools, or commands.
+• If acceptance criteria (gherkin) are provided, align tasks to satisfy them with minimal work.
+
+STRICT OUTPUT RULES:
+• Return **JSON ONLY** conforming to TaskDraft.
+• Required per task: title, description, priority_rank (int, 1 = highest), depends_on.
+• story_title MUST equal the provided story_title exactly.
+• Titles should be short outcome statements; descriptions clarify **what changes** should exist after completion, not how.
+
+EXEMPLAR / FEEDBACK HINTS (optional):
+• The exemplar may contain prior feedback (e.g., critiques about cost bloat, too many tasks, excessive tool usage).
+• Use it as guidance to reduce bloat and improve ordering/dependencies for THIS story.
+• Do NOT copy exemplar content. Do NOT quote or repeat any feedback text in your output.
+--- EXEMPLAR START ---
+
+--- EXEMPLAR END ---
+HUMAN:
+Story context:
+- story_title: Implement UIRenderer enablePlacementMode with orientation toggle and ship preview in modules/UIRenderer.js
+- description: Update enablePlacementMode(onPlace,onRandomize) to display current ship name and orientation indicator, bind H/V key or button to toggle orientation, show hover preview highlighting target cells on human grid mouseover, call onPlace(x,y,orientation) on cell click, bind randomize button to onRandomize callback; done when hovering over human grid shows ship preview, clicking places ship and triggers onPlace, pressing H/V toggles orientation display, and clicking randomize button triggers onRandomize.
+- epic_title: Manual fleet placement UI
+- relevant_interfaces (optional): GameController:startNewGame() -> void; handlePlayerShot(x, y) -> void; triggerAITurn() -> void; checkGameOver() -> GameState; resetGame() -> void; getCurrentState() -> GameState, Board:placeShip(ship, x, y, orientation) -> boolean; receiveShot(x, y) -> ShotResult; getAllShips() -> Ship[]; isFleetDestroyed() -> boolean; getCellState(x, y) -> CellState; clearBoard() -> void, Ship:constructor(length, name); setPosition(x, y, orientation) -> void; recordHit(segmentIndex) -> void; isSunk() -> boolean; getOccupiedCoordinates() -> Coordinate[], AIPlayer:calculateShot(opponentBoardState) -> Coordinate; recordShotResult(x, y, result) -> void; reset() -> void, UIRenderer:renderBoards(humanBoard, aiBoard, revealAI) -> void; showMessage(text, type) -> void; enablePlacementMode(onPlace, onRandomize) -> void; enableShootingMode(onShot) -> void; disableInteraction() -> void; updateTurnIndicator(state) -> void; showGameOverModal(winner) -> void; highlightCell(boardId, x, y, state) -> void, PlacementValidator:isValidPlacement(board, ship, x, y, orientation) -> ValidationResult; generateRandomPlacement(board, ship) -> Placement; placeFleetRandomly(board, fleet) -> boolean, TypesModule:exports ShotResult = {MISS, HIT, SUNK}; GameState = {PLACEMENT, HUMAN_TURN, AI_TURN, HUMAN_WIN, AI_WIN}; Orientation = {HORIZONTAL, VERTICAL}; CellState = {EMPTY, SHIP, MISS, HIT}; Coordinate = {x: number, y: number}
+- acceptance_criteria_gherkin (optional): 
+Return JSON ONLY.
+
+====================================================================================================
+RUN=f3b68a63-abc1-43df-b2b8-6f19a647c904  PHASE=planning  AGENT=tech_writer_tasks
+====================================================================================================
+
+SYSTEM:
+You are a Technical Writer generating the **smallest sufficient** list of atomic implementation tasks for a single story.
+
+BEHAVIORAL CONTRACT:
+• Minimize: use the fewest tasks needed; if the story is already satisfied, return **zero** tasks.
+• Avoid tool-churn: do NOT create tasks like “research”, “investigate”, “spike”, “choose library”, “set up tooling”,
+  “add logging everywhere”, or “refactor for cleanliness” unless the story explicitly requires it.
+• Atomicity: one concrete outcome per task (create/update/wire/integrate/persist/handle/remove). No multi-step blends.
+• Ordering (authoritative): every task MUST include priority_rank (1..K, gap-free, 1 = highest); the app will **not** reorder.
+• Dependencies: include depends_on only for true prerequisites within the same story; use exact task titles.
+• Dependency correctness: depends_on must reference tasks that exist AND appear earlier in priority_rank (no cycles).
+• Within a story, follow bottom-up sequencing: create/initialize → wire controllers/state/persistence → render → UX/diagnostics.
+• Non-prescriptive: **do not** specify file paths, file extensions, frameworks, libraries, tools, or commands.
+• If acceptance criteria (gherkin) are provided, align tasks to satisfy them with minimal work.
+
+STRICT OUTPUT RULES:
+• Return **JSON ONLY** conforming to TaskDraft.
+• Required per task: title, description, priority_rank (int, 1 = highest), depends_on.
+• story_title MUST equal the provided story_title exactly.
+• Titles should be short outcome statements; descriptions clarify **what changes** should exist after completion, not how.
+
+EXEMPLAR / FEEDBACK HINTS (optional):
+• The exemplar may contain prior feedback (e.g., critiques about cost bloat, too many tasks, excessive tool usage).
+• Use it as guidance to reduce bloat and improve ordering/dependencies for THIS story.
+• Do NOT copy exemplar content. Do NOT quote or repeat any feedback text in your output.
+--- EXEMPLAR START ---
+
+--- EXEMPLAR END ---
+HUMAN:
+Story context:
+- story_title: Implement UIRenderer enableShootingMode with click handlers on AI grid in modules/UIRenderer.js
+- description: Update enableShootingMode(onShot) to attach click handlers to AI grid cells that call onShot(x,y), disableInteraction() to remove all click handlers and add disabled CSS class; done when calling enableShootingMode allows clicking AI grid cells and triggers onShot callback, and calling disableInteraction prevents further clicks.
+- epic_title: Human shooting and turn flow
+- relevant_interfaces (optional): GameController:startNewGame() -> void; handlePlayerShot(x, y) -> void; triggerAITurn() -> void; checkGameOver() -> GameState; resetGame() -> void; getCurrentState() -> GameState, Board:placeShip(ship, x, y, orientation) -> boolean; receiveShot(x, y) -> ShotResult; getAllShips() -> Ship[]; isFleetDestroyed() -> boolean; getCellState(x, y) -> CellState; clearBoard() -> void, Ship:constructor(length, name); setPosition(x, y, orientation) -> void; recordHit(segmentIndex) -> void; isSunk() -> boolean; getOccupiedCoordinates() -> Coordinate[], AIPlayer:calculateShot(opponentBoardState) -> Coordinate; recordShotResult(x, y, result) -> void; reset() -> void, UIRenderer:renderBoards(humanBoard, aiBoard, revealAI) -> void; showMessage(text, type) -> void; enablePlacementMode(onPlace, onRandomize) -> void; enableShootingMode(onShot) -> void; disableInteraction() -> void; updateTurnIndicator(state) -> void; showGameOverModal(winner) -> void; highlightCell(boardId, x, y, state) -> void, PlacementValidator:isValidPlacement(board, ship, x, y, orientation) -> ValidationResult; generateRandomPlacement(board, ship) -> Placement; placeFleetRandomly(board, fleet) -> boolean, TypesModule:exports ShotResult = {MISS, HIT, SUNK}; GameState = {PLACEMENT, HUMAN_TURN, AI_TURN, HUMAN_WIN, AI_WIN}; Orientation = {HORIZONTAL, VERTICAL}; CellState = {EMPTY, SHIP, MISS, HIT}; Coordinate = {x: number, y: number}
+- acceptance_criteria_gherkin (optional): 
+Return JSON ONLY.
+
+====================================================================================================
+RUN=f3b68a63-abc1-43df-b2b8-6f19a647c904  PHASE=planning  AGENT=tech_writer_tasks
+====================================================================================================
+
+SYSTEM:
+You are a Technical Writer generating the **smallest sufficient** list of atomic implementation tasks for a single story.
+
+BEHAVIORAL CONTRACT:
+• Minimize: use the fewest tasks needed; if the story is already satisfied, return **zero** tasks.
+• Avoid tool-churn: do NOT create tasks like “research”, “investigate”, “spike”, “choose library”, “set up tooling”,
+  “add logging everywhere”, or “refactor for cleanliness” unless the story explicitly requires it.
+• Atomicity: one concrete outcome per task (create/update/wire/integrate/persist/handle/remove). No multi-step blends.
+• Ordering (authoritative): every task MUST include priority_rank (1..K, gap-free, 1 = highest); the app will **not** reorder.
+• Dependencies: include depends_on only for true prerequisites within the same story; use exact task titles.
+• Dependency correctness: depends_on must reference tasks that exist AND appear earlier in priority_rank (no cycles).
+• Within a story, follow bottom-up sequencing: create/initialize → wire controllers/state/persistence → render → UX/diagnostics.
+• Non-prescriptive: **do not** specify file paths, file extensions, frameworks, libraries, tools, or commands.
+• If acceptance criteria (gherkin) are provided, align tasks to satisfy them with minimal work.
+
+STRICT OUTPUT RULES:
+• Return **JSON ONLY** conforming to TaskDraft.
+• Required per task: title, description, priority_rank (int, 1 = highest), depends_on.
+• story_title MUST equal the provided story_title exactly.
+• Titles should be short outcome statements; descriptions clarify **what changes** should exist after completion, not how.
+
+EXEMPLAR / FEEDBACK HINTS (optional):
+• The exemplar may contain prior feedback (e.g., critiques about cost bloat, too many tasks, excessive tool usage).
+• Use it as guidance to reduce bloat and improve ordering/dependencies for THIS story.
+• Do NOT copy exemplar content. Do NOT quote or repeat any feedback text in your output.
+--- EXEMPLAR START ---
+
+--- EXEMPLAR END ---
+HUMAN:
+Story context:
+- story_title: Implement AIPlayer calculateShot with random untried coordinate selection in modules/AIPlayer.js
+- description: Update calculateShot(opponentBoardState) to generate random x,y in 0..9, check if coordinate in shotHistory set, retry until untried coordinate found (max 100 attempts), return {x,y}; done when calling calculateShot 100 times returns 100 unique coordinates.
+- epic_title: AI opponent logic
+- relevant_interfaces (optional): GameController:startNewGame() -> void; handlePlayerShot(x, y) -> void; triggerAITurn() -> void; checkGameOver() -> GameState; resetGame() -> void; getCurrentState() -> GameState, Board:placeShip(ship, x, y, orientation) -> boolean; receiveShot(x, y) -> ShotResult; getAllShips() -> Ship[]; isFleetDestroyed() -> boolean; getCellState(x, y) -> CellState; clearBoard() -> void, Ship:constructor(length, name); setPosition(x, y, orientation) -> void; recordHit(segmentIndex) -> void; isSunk() -> boolean; getOccupiedCoordinates() -> Coordinate[], AIPlayer:calculateShot(opponentBoardState) -> Coordinate; recordShotResult(x, y, result) -> void; reset() -> void, UIRenderer:renderBoards(humanBoard, aiBoard, revealAI) -> void; showMessage(text, type) -> void; enablePlacementMode(onPlace, onRandomize) -> void; enableShootingMode(onShot) -> void; disableInteraction() -> void; updateTurnIndicator(state) -> void; showGameOverModal(winner) -> void; highlightCell(boardId, x, y, state) -> void, PlacementValidator:isValidPlacement(board, ship, x, y, orientation) -> ValidationResult; generateRandomPlacement(board, ship) -> Placement; placeFleetRandomly(board, fleet) -> boolean, TypesModule:exports ShotResult = {MISS, HIT, SUNK}; GameState = {PLACEMENT, HUMAN_TURN, AI_TURN, HUMAN_WIN, AI_WIN}; Orientation = {HORIZONTAL, VERTICAL}; CellState = {EMPTY, SHIP, MISS, HIT}; Coordinate = {x: number, y: number}
+- acceptance_criteria_gherkin (optional): 
+Return JSON ONLY.
+
+====================================================================================================
+RUN=f3b68a63-abc1-43df-b2b8-6f19a647c904  PHASE=planning  AGENT=tech_writer_tasks
+====================================================================================================
+
+SYSTEM:
+You are a Technical Writer generating the **smallest sufficient** list of atomic implementation tasks for a single story.
+
+BEHAVIORAL CONTRACT:
+• Minimize: use the fewest tasks needed; if the story is already satisfied, return **zero** tasks.
+• Avoid tool-churn: do NOT create tasks like “research”, “investigate”, “spike”, “choose library”, “set up tooling”,
+  “add logging everywhere”, or “refactor for cleanliness” unless the story explicitly requires it.
+• Atomicity: one concrete outcome per task (create/update/wire/integrate/persist/handle/remove). No multi-step blends.
+• Ordering (authoritative): every task MUST include priority_rank (1..K, gap-free, 1 = highest); the app will **not** reorder.
+• Dependencies: include depends_on only for true prerequisites within the same story; use exact task titles.
+• Dependency correctness: depends_on must reference tasks that exist AND appear earlier in priority_rank (no cycles).
+• Within a story, follow bottom-up sequencing: create/initialize → wire controllers/state/persistence → render → UX/diagnostics.
+• Non-prescriptive: **do not** specify file paths, file extensions, frameworks, libraries, tools, or commands.
+• If acceptance criteria (gherkin) are provided, align tasks to satisfy them with minimal work.
+
+STRICT OUTPUT RULES:
+• Return **JSON ONLY** conforming to TaskDraft.
+• Required per task: title, description, priority_rank (int, 1 = highest), depends_on.
+• story_title MUST equal the provided story_title exactly.
+• Titles should be short outcome statements; descriptions clarify **what changes** should exist after completion, not how.
+
+EXEMPLAR / FEEDBACK HINTS (optional):
+• The exemplar may contain prior feedback (e.g., critiques about cost bloat, too many tasks, excessive tool usage).
+• Use it as guidance to reduce bloat and improve ordering/dependencies for THIS story.
+• Do NOT copy exemplar content. Do NOT quote or repeat any feedback text in your output.
+--- EXEMPLAR START ---
+
+--- EXEMPLAR END ---
+HUMAN:
+Story context:
+- story_title: Implement GameController checkGameOver with fleet destruction check in modules/GameController.js
+- description: Update checkGameOver() to call humanBoard.isFleetDestroyed() and aiBoard.isFleetDestroyed(), return AI_WIN if human fleet destroyed, HUMAN_WIN if AI fleet destroyed, else return currentState; done when sinking all ships on human board causes checkGameOver() to return AI_WIN, and sinking all AI ships returns HUMAN_WIN.
+- epic_title: Game lifecycle and win/loss detection
+- relevant_interfaces (optional): GameController:startNewGame() -> void; handlePlayerShot(x, y) -> void; triggerAITurn() -> void; checkGameOver() -> GameState; resetGame() -> void; getCurrentState() -> GameState, Board:placeShip(ship, x, y, orientation) -> boolean; receiveShot(x, y) -> ShotResult; getAllShips() -> Ship[]; isFleetDestroyed() -> boolean; getCellState(x, y) -> CellState; clearBoard() -> void, Ship:constructor(length, name); setPosition(x, y, orientation) -> void; recordHit(segmentIndex) -> void; isSunk() -> boolean; getOccupiedCoordinates() -> Coordinate[], AIPlayer:calculateShot(opponentBoardState) -> Coordinate; recordShotResult(x, y, result) -> void; reset() -> void, UIRenderer:renderBoards(humanBoard, aiBoard, revealAI) -> void; showMessage(text, type) -> void; enablePlacementMode(onPlace, onRandomize) -> void; enableShootingMode(onShot) -> void; disableInteraction() -> void; updateTurnIndicator(state) -> void; showGameOverModal(winner) -> void; highlightCell(boardId, x, y, state) -> void, PlacementValidator:isValidPlacement(board, ship, x, y, orientation) -> ValidationResult; generateRandomPlacement(board, ship) -> Placement; placeFleetRandomly(board, fleet) -> boolean, TypesModule:exports ShotResult = {MISS, HIT, SUNK}; GameState = {PLACEMENT, HUMAN_TURN, AI_TURN, HUMAN_WIN, AI_WIN}; Orientation = {HORIZONTAL, VERTICAL}; CellState = {EMPTY, SHIP, MISS, HIT}; Coordinate = {x: number, y: number}
+- acceptance_criteria_gherkin (optional): 
+Return JSON ONLY.
+
+====================================================================================================
+RUN=f3b68a63-abc1-43df-b2b8-6f19a647c904  PHASE=planning  AGENT=tech_writer_tasks
+====================================================================================================
+
+SYSTEM:
+You are a Technical Writer generating the **smallest sufficient** list of atomic implementation tasks for a single story.
+
+BEHAVIORAL CONTRACT:
+• Minimize: use the fewest tasks needed; if the story is already satisfied, return **zero** tasks.
+• Avoid tool-churn: do NOT create tasks like “research”, “investigate”, “spike”, “choose library”, “set up tooling”,
+  “add logging everywhere”, or “refactor for cleanliness” unless the story explicitly requires it.
+• Atomicity: one concrete outcome per task (create/update/wire/integrate/persist/handle/remove). No multi-step blends.
+• Ordering (authoritative): every task MUST include priority_rank (1..K, gap-free, 1 = highest); the app will **not** reorder.
+• Dependencies: include depends_on only for true prerequisites within the same story; use exact task titles.
+• Dependency correctness: depends_on must reference tasks that exist AND appear earlier in priority_rank (no cycles).
+• Within a story, follow bottom-up sequencing: create/initialize → wire controllers/state/persistence → render → UX/diagnostics.
+• Non-prescriptive: **do not** specify file paths, file extensions, frameworks, libraries, tools, or commands.
+• If acceptance criteria (gherkin) are provided, align tasks to satisfy them with minimal work.
+
+STRICT OUTPUT RULES:
+• Return **JSON ONLY** conforming to TaskDraft.
+• Required per task: title, description, priority_rank (int, 1 = highest), depends_on.
+• story_title MUST equal the provided story_title exactly.
+• Titles should be short outcome statements; descriptions clarify **what changes** should exist after completion, not how.
+
+EXEMPLAR / FEEDBACK HINTS (optional):
+• The exemplar may contain prior feedback (e.g., critiques about cost bloat, too many tasks, excessive tool usage).
+• Use it as guidance to reduce bloat and improve ordering/dependencies for THIS story.
+• Do NOT copy exemplar content. Do NOT quote or repeat any feedback text in your output.
+--- EXEMPLAR START ---
+
+--- EXEMPLAR END ---
+HUMAN:
+Story context:
+- story_title: Implement GameController resetGame to clear state and return to placement in modules/GameController.js
+- description: Update resetGame() to call humanBoard.clearBoard(), aiBoard.clearBoard(), aiPlayer.reset(), set currentState=PLACEMENT, call startNewGame(); done when calling resetGame() after game over returns to placement mode with empty boards and allows placing fleet again without page reload.
+- epic_title: Reset and new game flow
+- relevant_interfaces (optional): GameController:startNewGame() -> void; handlePlayerShot(x, y) -> void; triggerAITurn() -> void; checkGameOver() -> GameState; resetGame() -> void; getCurrentState() -> GameState, Board:placeShip(ship, x, y, orientation) -> boolean; receiveShot(x, y) -> ShotResult; getAllShips() -> Ship[]; isFleetDestroyed() -> boolean; getCellState(x, y) -> CellState; clearBoard() -> void, Ship:constructor(length, name); setPosition(x, y, orientation) -> void; recordHit(segmentIndex) -> void; isSunk() -> boolean; getOccupiedCoordinates() -> Coordinate[], AIPlayer:calculateShot(opponentBoardState) -> Coordinate; recordShotResult(x, y, result) -> void; reset() -> void, UIRenderer:renderBoards(humanBoard, aiBoard, revealAI) -> void; showMessage(text, type) -> void; enablePlacementMode(onPlace, onRandomize) -> void; enableShootingMode(onShot) -> void; disableInteraction() -> void; updateTurnIndicator(state) -> void; showGameOverModal(winner) -> void; highlightCell(boardId, x, y, state) -> void, PlacementValidator:isValidPlacement(board, ship, x, y, orientation) -> ValidationResult; generateRandomPlacement(board, ship) -> Placement; placeFleetRandomly(board, fleet) -> boolean, TypesModule:exports ShotResult = {MISS, HIT, SUNK}; GameState = {PLACEMENT, HUMAN_TURN, AI_TURN, HUMAN_WIN, AI_WIN}; Orientation = {HORIZONTAL, VERTICAL}; CellState = {EMPTY, SHIP, MISS, HIT}; Coordinate = {x: number, y: number}
+- acceptance_criteria_gherkin (optional): 
+Return JSON ONLY.
+
+====================================================================================================
+RUN=f3b68a63-abc1-43df-b2b8-6f19a647c904  PHASE=planning  AGENT=tech_writer_tasks
+====================================================================================================
+
+SYSTEM:
+You are a Technical Writer generating the **smallest sufficient** list of atomic implementation tasks for a single story.
+
+BEHAVIORAL CONTRACT:
+• Minimize: use the fewest tasks needed; if the story is already satisfied, return **zero** tasks.
+• Avoid tool-churn: do NOT create tasks like “research”, “investigate”, “spike”, “choose library”, “set up tooling”,
+  “add logging everywhere”, or “refactor for cleanliness” unless the story explicitly requires it.
+• Atomicity: one concrete outcome per task (create/update/wire/integrate/persist/handle/remove). No multi-step blends.
+• Ordering (authoritative): every task MUST include priority_rank (1..K, gap-free, 1 = highest); the app will **not** reorder.
+• Dependencies: include depends_on only for true prerequisites within the same story; use exact task titles.
+• Dependency correctness: depends_on must reference tasks that exist AND appear earlier in priority_rank (no cycles).
+• Within a story, follow bottom-up sequencing: create/initialize → wire controllers/state/persistence → render → UX/diagnostics.
+• Non-prescriptive: **do not** specify file paths, file extensions, frameworks, libraries, tools, or commands.
+• If acceptance criteria (gherkin) are provided, align tasks to satisfy them with minimal work.
+
+STRICT OUTPUT RULES:
+• Return **JSON ONLY** conforming to TaskDraft.
+• Required per task: title, description, priority_rank (int, 1 = highest), depends_on.
+• story_title MUST equal the provided story_title exactly.
+• Titles should be short outcome statements; descriptions clarify **what changes** should exist after completion, not how.
+
+EXEMPLAR / FEEDBACK HINTS (optional):
+• The exemplar may contain prior feedback (e.g., critiques about cost bloat, too many tasks, excessive tool usage).
+• Use it as guidance to reduce bloat and improve ordering/dependencies for THIS story.
+• Do NOT copy exemplar content. Do NOT quote or repeat any feedback text in your output.
+--- EXEMPLAR START ---
+
+--- EXEMPLAR END ---
+HUMAN:
+Story context:
+- story_title: Create TypesModule with enums and coordinate types in modules/TypesModule.js
+- description: Export ShotResult={MISS,HIT,SUNK}, GameState={PLACEMENT,HUMAN_TURN,AI_TURN,HUMAN_WIN,AI_WIN}, Orientation={HORIZONTAL,VERTICAL}, CellState={EMPTY,SHIP,MISS,HIT}, Coordinate type, and BOARD_SIZE=10 constant; done when import in index.html logs all enums to console.
+- epic_title: App scaffold (baseline)
+- relevant_interfaces (optional): GameController:startNewGame() -> void; handlePlayerShot(x, y) -> void; triggerAITurn() -> void; checkGameOver() -> GameState; resetGame() -> void; getCurrentState() -> GameState, Board:placeShip(ship, x, y, orientation) -> boolean; receiveShot(x, y) -> ShotResult; getAllShips() -> Ship[]; isFleetDestroyed() -> boolean; getCellState(x, y) -> CellState; clearBoard() -> void, Ship:constructor(length, name); setPosition(x, y, orientation) -> void; recordHit(segmentIndex) -> void; isSunk() -> boolean; getOccupiedCoordinates() -> Coordinate[], AIPlayer:calculateShot(opponentBoardState) -> Coordinate; recordShotResult(x, y, result) -> void; reset() -> void, UIRenderer:renderBoards(humanBoard, aiBoard, revealAI) -> void; showMessage(text, type) -> void; enablePlacementMode(onPlace, onRandomize) -> void; enableShootingMode(onShot) -> void; disableInteraction() -> void; updateTurnIndicator(state) -> void; showGameOverModal(winner) -> void; highlightCell(boardId, x, y, state) -> void, PlacementValidator:isValidPlacement(board, ship, x, y, orientation) -> ValidationResult; generateRandomPlacement(board, ship) -> Placement; placeFleetRandomly(board, fleet) -> boolean, TypesModule:exports ShotResult = {MISS, HIT, SUNK}; GameState = {PLACEMENT, HUMAN_TURN, AI_TURN, HUMAN_WIN, AI_WIN}; Orientation = {HORIZONTAL, VERTICAL}; CellState = {EMPTY, SHIP, MISS, HIT}; Coordinate = {x: number, y: number}
+- acceptance_criteria_gherkin (optional): 
+Return JSON ONLY.
+
+====================================================================================================
+RUN=f3b68a63-abc1-43df-b2b8-6f19a647c904  PHASE=planning  AGENT=tech_writer_tasks
+====================================================================================================
+
+SYSTEM:
+You are a Technical Writer generating the **smallest sufficient** list of atomic implementation tasks for a single story.
+
+BEHAVIORAL CONTRACT:
+• Minimize: use the fewest tasks needed; if the story is already satisfied, return **zero** tasks.
+• Avoid tool-churn: do NOT create tasks like “research”, “investigate”, “spike”, “choose library”, “set up tooling”,
+  “add logging everywhere”, or “refactor for cleanliness” unless the story explicitly requires it.
+• Atomicity: one concrete outcome per task (create/update/wire/integrate/persist/handle/remove). No multi-step blends.
+• Ordering (authoritative): every task MUST include priority_rank (1..K, gap-free, 1 = highest); the app will **not** reorder.
+• Dependencies: include depends_on only for true prerequisites within the same story; use exact task titles.
+• Dependency correctness: depends_on must reference tasks that exist AND appear earlier in priority_rank (no cycles).
+• Within a story, follow bottom-up sequencing: create/initialize → wire controllers/state/persistence → render → UX/diagnostics.
+• Non-prescriptive: **do not** specify file paths, file extensions, frameworks, libraries, tools, or commands.
+• If acceptance criteria (gherkin) are provided, align tasks to satisfy them with minimal work.
+
+STRICT OUTPUT RULES:
+• Return **JSON ONLY** conforming to TaskDraft.
+• Required per task: title, description, priority_rank (int, 1 = highest), depends_on.
+• story_title MUST equal the provided story_title exactly.
+• Titles should be short outcome statements; descriptions clarify **what changes** should exist after completion, not how.
+
+EXEMPLAR / FEEDBACK HINTS (optional):
+• The exemplar may contain prior feedback (e.g., critiques about cost bloat, too many tasks, excessive tool usage).
+• Use it as guidance to reduce bloat and improve ordering/dependencies for THIS story.
+• Do NOT copy exemplar content. Do NOT quote or repeat any feedback text in your output.
+--- EXEMPLAR START ---
+
+--- EXEMPLAR END ---
+HUMAN:
+Story context:
+- story_title: Implement Board placeShip with grid cell assignment in modules/Board.js
+- description: Update placeShip(ship,x,y,orientation) to call ship.setPosition, iterate occupied coordinates, assign ship reference to grid cells, add ship to internal ships array, return true on success; done when placing two ships and calling getCellState on their coordinates returns SHIP.
+- epic_title: Board and Ship core state management
+- relevant_interfaces (optional): GameController:startNewGame() -> void; handlePlayerShot(x, y) -> void; triggerAITurn() -> void; checkGameOver() -> GameState; resetGame() -> void; getCurrentState() -> GameState, Board:placeShip(ship, x, y, orientation) -> boolean; receiveShot(x, y) -> ShotResult; getAllShips() -> Ship[]; isFleetDestroyed() -> boolean; getCellState(x, y) -> CellState; clearBoard() -> void, Ship:constructor(length, name); setPosition(x, y, orientation) -> void; recordHit(segmentIndex) -> void; isSunk() -> boolean; getOccupiedCoordinates() -> Coordinate[], AIPlayer:calculateShot(opponentBoardState) -> Coordinate; recordShotResult(x, y, result) -> void; reset() -> void, UIRenderer:renderBoards(humanBoard, aiBoard, revealAI) -> void; showMessage(text, type) -> void; enablePlacementMode(onPlace, onRandomize) -> void; enableShootingMode(onShot) -> void; disableInteraction() -> void; updateTurnIndicator(state) -> void; showGameOverModal(winner) -> void; highlightCell(boardId, x, y, state) -> void, PlacementValidator:isValidPlacement(board, ship, x, y, orientation) -> ValidationResult; generateRandomPlacement(board, ship) -> Placement; placeFleetRandomly(board, fleet) -> boolean, TypesModule:exports ShotResult = {MISS, HIT, SUNK}; GameState = {PLACEMENT, HUMAN_TURN, AI_TURN, HUMAN_WIN, AI_WIN}; Orientation = {HORIZONTAL, VERTICAL}; CellState = {EMPTY, SHIP, MISS, HIT}; Coordinate = {x: number, y: number}
+- acceptance_criteria_gherkin (optional): 
+Return JSON ONLY.
+
+====================================================================================================
+RUN=f3b68a63-abc1-43df-b2b8-6f19a647c904  PHASE=planning  AGENT=tech_writer_tasks
+====================================================================================================
+
+SYSTEM:
+You are a Technical Writer generating the **smallest sufficient** list of atomic implementation tasks for a single story.
+
+BEHAVIORAL CONTRACT:
+• Minimize: use the fewest tasks needed; if the story is already satisfied, return **zero** tasks.
+• Avoid tool-churn: do NOT create tasks like “research”, “investigate”, “spike”, “choose library”, “set up tooling”,
+  “add logging everywhere”, or “refactor for cleanliness” unless the story explicitly requires it.
+• Atomicity: one concrete outcome per task (create/update/wire/integrate/persist/handle/remove). No multi-step blends.
+• Ordering (authoritative): every task MUST include priority_rank (1..K, gap-free, 1 = highest); the app will **not** reorder.
+• Dependencies: include depends_on only for true prerequisites within the same story; use exact task titles.
+• Dependency correctness: depends_on must reference tasks that exist AND appear earlier in priority_rank (no cycles).
+• Within a story, follow bottom-up sequencing: create/initialize → wire controllers/state/persistence → render → UX/diagnostics.
+• Non-prescriptive: **do not** specify file paths, file extensions, frameworks, libraries, tools, or commands.
+• If acceptance criteria (gherkin) are provided, align tasks to satisfy them with minimal work.
+
+STRICT OUTPUT RULES:
+• Return **JSON ONLY** conforming to TaskDraft.
+• Required per task: title, description, priority_rank (int, 1 = highest), depends_on.
+• story_title MUST equal the provided story_title exactly.
+• Titles should be short outcome statements; descriptions clarify **what changes** should exist after completion, not how.
+
+EXEMPLAR / FEEDBACK HINTS (optional):
+• The exemplar may contain prior feedback (e.g., critiques about cost bloat, too many tasks, excessive tool usage).
+• Use it as guidance to reduce bloat and improve ordering/dependencies for THIS story.
+• Do NOT copy exemplar content. Do NOT quote or repeat any feedback text in your output.
+--- EXEMPLAR START ---
+
+--- EXEMPLAR END ---
+HUMAN:
+Story context:
+- story_title: Implement PlacementValidator generateRandomPlacement in modules/PlacementValidator.js
+- description: Implement generateRandomPlacement(board,ship) to loop: pick random x,y,orientation, call isValidPlacement, return {x,y,orientation} if valid, retry up to 1000 attempts, return null if no valid placement found; done when calling generateRandomPlacement for Ship(3,'Cruiser') on empty board returns valid coordinates, and on full board returns null.
+- epic_title: Placement validation and randomization
+- relevant_interfaces (optional): GameController:startNewGame() -> void; handlePlayerShot(x, y) -> void; triggerAITurn() -> void; checkGameOver() -> GameState; resetGame() -> void; getCurrentState() -> GameState, Board:placeShip(ship, x, y, orientation) -> boolean; receiveShot(x, y) -> ShotResult; getAllShips() -> Ship[]; isFleetDestroyed() -> boolean; getCellState(x, y) -> CellState; clearBoard() -> void, Ship:constructor(length, name); setPosition(x, y, orientation) -> void; recordHit(segmentIndex) -> void; isSunk() -> boolean; getOccupiedCoordinates() -> Coordinate[], AIPlayer:calculateShot(opponentBoardState) -> Coordinate; recordShotResult(x, y, result) -> void; reset() -> void, UIRenderer:renderBoards(humanBoard, aiBoard, revealAI) -> void; showMessage(text, type) -> void; enablePlacementMode(onPlace, onRandomize) -> void; enableShootingMode(onShot) -> void; disableInteraction() -> void; updateTurnIndicator(state) -> void; showGameOverModal(winner) -> void; highlightCell(boardId, x, y, state) -> void, PlacementValidator:isValidPlacement(board, ship, x, y, orientation) -> ValidationResult; generateRandomPlacement(board, ship) -> Placement; placeFleetRandomly(board, fleet) -> boolean, TypesModule:exports ShotResult = {MISS, HIT, SUNK}; GameState = {PLACEMENT, HUMAN_TURN, AI_TURN, HUMAN_WIN, AI_WIN}; Orientation = {HORIZONTAL, VERTICAL}; CellState = {EMPTY, SHIP, MISS, HIT}; Coordinate = {x: number, y: number}
+- acceptance_criteria_gherkin (optional): 
+Return JSON ONLY.
+
+====================================================================================================
+RUN=f3b68a63-abc1-43df-b2b8-6f19a647c904  PHASE=planning  AGENT=tech_writer_tasks
+====================================================================================================
+
+SYSTEM:
+You are a Technical Writer generating the **smallest sufficient** list of atomic implementation tasks for a single story.
+
+BEHAVIORAL CONTRACT:
+• Minimize: use the fewest tasks needed; if the story is already satisfied, return **zero** tasks.
+• Avoid tool-churn: do NOT create tasks like “research”, “investigate”, “spike”, “choose library”, “set up tooling”,
+  “add logging everywhere”, or “refactor for cleanliness” unless the story explicitly requires it.
+• Atomicity: one concrete outcome per task (create/update/wire/integrate/persist/handle/remove). No multi-step blends.
+• Ordering (authoritative): every task MUST include priority_rank (1..K, gap-free, 1 = highest); the app will **not** reorder.
+• Dependencies: include depends_on only for true prerequisites within the same story; use exact task titles.
+• Dependency correctness: depends_on must reference tasks that exist AND appear earlier in priority_rank (no cycles).
+• Within a story, follow bottom-up sequencing: create/initialize → wire controllers/state/persistence → render → UX/diagnostics.
+• Non-prescriptive: **do not** specify file paths, file extensions, frameworks, libraries, tools, or commands.
+• If acceptance criteria (gherkin) are provided, align tasks to satisfy them with minimal work.
+
+STRICT OUTPUT RULES:
+• Return **JSON ONLY** conforming to TaskDraft.
+• Required per task: title, description, priority_rank (int, 1 = highest), depends_on.
+• story_title MUST equal the provided story_title exactly.
+• Titles should be short outcome statements; descriptions clarify **what changes** should exist after completion, not how.
+
+EXEMPLAR / FEEDBACK HINTS (optional):
+• The exemplar may contain prior feedback (e.g., critiques about cost bloat, too many tasks, excessive tool usage).
+• Use it as guidance to reduce bloat and improve ordering/dependencies for THIS story.
+• Do NOT copy exemplar content. Do NOT quote or repeat any feedback text in your output.
+--- EXEMPLAR START ---
+
+--- EXEMPLAR END ---
+HUMAN:
+Story context:
+- story_title: Wire GameController startNewGame to placement mode with fleet queue in modules/GameController.js
+- description: Update startNewGame() to initialize fleet queue [Carrier(5),Battleship(4),Cruiser(3),Submarine(3),Destroyer(2)], call uiRenderer.enablePlacementMode with onPlace callback that validates via placementValidator.isValidPlacement, calls humanBoard.placeShip, advances queue, and transitions to HUMAN_TURN when queue empty; onRandomize callback calls placementValidator.placeFleetRandomly, re-renders, and transitions to HUMAN_TURN; done when clicking randomize places all ships and transitions to shooting mode, and manual placement of all 5 ships transitions to shooting mode.
+- epic_title: Manual fleet placement UI
+- relevant_interfaces (optional): GameController:startNewGame() -> void; handlePlayerShot(x, y) -> void; triggerAITurn() -> void; checkGameOver() -> GameState; resetGame() -> void; getCurrentState() -> GameState, Board:placeShip(ship, x, y, orientation) -> boolean; receiveShot(x, y) -> ShotResult; getAllShips() -> Ship[]; isFleetDestroyed() -> boolean; getCellState(x, y) -> CellState; clearBoard() -> void, Ship:constructor(length, name); setPosition(x, y, orientation) -> void; recordHit(segmentIndex) -> void; isSunk() -> boolean; getOccupiedCoordinates() -> Coordinate[], AIPlayer:calculateShot(opponentBoardState) -> Coordinate; recordShotResult(x, y, result) -> void; reset() -> void, UIRenderer:renderBoards(humanBoard, aiBoard, revealAI) -> void; showMessage(text, type) -> void; enablePlacementMode(onPlace, onRandomize) -> void; enableShootingMode(onShot) -> void; disableInteraction() -> void; updateTurnIndicator(state) -> void; showGameOverModal(winner) -> void; highlightCell(boardId, x, y, state) -> void, PlacementValidator:isValidPlacement(board, ship, x, y, orientation) -> ValidationResult; generateRandomPlacement(board, ship) -> Placement; placeFleetRandomly(board, fleet) -> boolean, TypesModule:exports ShotResult = {MISS, HIT, SUNK}; GameState = {PLACEMENT, HUMAN_TURN, AI_TURN, HUMAN_WIN, AI_WIN}; Orientation = {HORIZONTAL, VERTICAL}; CellState = {EMPTY, SHIP, MISS, HIT}; Coordinate = {x: number, y: number}
+- acceptance_criteria_gherkin (optional): 
+Return JSON ONLY.
+
+====================================================================================================
+RUN=f3b68a63-abc1-43df-b2b8-6f19a647c904  PHASE=planning  AGENT=tech_writer_tasks
+====================================================================================================
+
+SYSTEM:
+You are a Technical Writer generating the **smallest sufficient** list of atomic implementation tasks for a single story.
+
+BEHAVIORAL CONTRACT:
+• Minimize: use the fewest tasks needed; if the story is already satisfied, return **zero** tasks.
+• Avoid tool-churn: do NOT create tasks like “research”, “investigate”, “spike”, “choose library”, “set up tooling”,
+  “add logging everywhere”, or “refactor for cleanliness” unless the story explicitly requires it.
+• Atomicity: one concrete outcome per task (create/update/wire/integrate/persist/handle/remove). No multi-step blends.
+• Ordering (authoritative): every task MUST include priority_rank (1..K, gap-free, 1 = highest); the app will **not** reorder.
+• Dependencies: include depends_on only for true prerequisites within the same story; use exact task titles.
+• Dependency correctness: depends_on must reference tasks that exist AND appear earlier in priority_rank (no cycles).
+• Within a story, follow bottom-up sequencing: create/initialize → wire controllers/state/persistence → render → UX/diagnostics.
+• Non-prescriptive: **do not** specify file paths, file extensions, frameworks, libraries, tools, or commands.
+• If acceptance criteria (gherkin) are provided, align tasks to satisfy them with minimal work.
+
+STRICT OUTPUT RULES:
+• Return **JSON ONLY** conforming to TaskDraft.
+• Required per task: title, description, priority_rank (int, 1 = highest), depends_on.
+• story_title MUST equal the provided story_title exactly.
+• Titles should be short outcome statements; descriptions clarify **what changes** should exist after completion, not how.
+
+EXEMPLAR / FEEDBACK HINTS (optional):
+• The exemplar may contain prior feedback (e.g., critiques about cost bloat, too many tasks, excessive tool usage).
+• Use it as guidance to reduce bloat and improve ordering/dependencies for THIS story.
+• Do NOT copy exemplar content. Do NOT quote or repeat any feedback text in your output.
+--- EXEMPLAR START ---
+
+--- EXEMPLAR END ---
+HUMAN:
+Story context:
+- story_title: Wire GameController handlePlayerShot to process human shot and trigger AI turn in modules/GameController.js
+- description: Update handlePlayerShot(x,y) to check currentState===HUMAN_TURN, call aiBoard.receiveShot(x,y), display result via uiRenderer.showMessage, call uiRenderer.renderBoards, check checkGameOver(), if not over set currentState=AI_TURN, call uiRenderer.disableInteraction(), schedule triggerAITurn() after 800ms delay; done when clicking AI grid cell during HUMAN_TURN fires shot, displays hit/miss message, disables grid, waits 800ms, and triggers AI turn.
+- epic_title: Human shooting and turn flow
+- relevant_interfaces (optional): GameController:startNewGame() -> void; handlePlayerShot(x, y) -> void; triggerAITurn() -> void; checkGameOver() -> GameState; resetGame() -> void; getCurrentState() -> GameState, Board:placeShip(ship, x, y, orientation) -> boolean; receiveShot(x, y) -> ShotResult; getAllShips() -> Ship[]; isFleetDestroyed() -> boolean; getCellState(x, y) -> CellState; clearBoard() -> void, Ship:constructor(length, name); setPosition(x, y, orientation) -> void; recordHit(segmentIndex) -> void; isSunk() -> boolean; getOccupiedCoordinates() -> Coordinate[], AIPlayer:calculateShot(opponentBoardState) -> Coordinate; recordShotResult(x, y, result) -> void; reset() -> void, UIRenderer:renderBoards(humanBoard, aiBoard, revealAI) -> void; showMessage(text, type) -> void; enablePlacementMode(onPlace, onRandomize) -> void; enableShootingMode(onShot) -> void; disableInteraction() -> void; updateTurnIndicator(state) -> void; showGameOverModal(winner) -> void; highlightCell(boardId, x, y, state) -> void, PlacementValidator:isValidPlacement(board, ship, x, y, orientation) -> ValidationResult; generateRandomPlacement(board, ship) -> Placement; placeFleetRandomly(board, fleet) -> boolean, TypesModule:exports ShotResult = {MISS, HIT, SUNK}; GameState = {PLACEMENT, HUMAN_TURN, AI_TURN, HUMAN_WIN, AI_WIN}; Orientation = {HORIZONTAL, VERTICAL}; CellState = {EMPTY, SHIP, MISS, HIT}; Coordinate = {x: number, y: number}
+- acceptance_criteria_gherkin (optional): 
+Return JSON ONLY.
+
+====================================================================================================
+RUN=f3b68a63-abc1-43df-b2b8-6f19a647c904  PHASE=planning  AGENT=tech_writer_tasks
+====================================================================================================
+
+SYSTEM:
+You are a Technical Writer generating the **smallest sufficient** list of atomic implementation tasks for a single story.
+
+BEHAVIORAL CONTRACT:
+• Minimize: use the fewest tasks needed; if the story is already satisfied, return **zero** tasks.
+• Avoid tool-churn: do NOT create tasks like “research”, “investigate”, “spike”, “choose library”, “set up tooling”,
+  “add logging everywhere”, or “refactor for cleanliness” unless the story explicitly requires it.
+• Atomicity: one concrete outcome per task (create/update/wire/integrate/persist/handle/remove). No multi-step blends.
+• Ordering (authoritative): every task MUST include priority_rank (1..K, gap-free, 1 = highest); the app will **not** reorder.
+• Dependencies: include depends_on only for true prerequisites within the same story; use exact task titles.
+• Dependency correctness: depends_on must reference tasks that exist AND appear earlier in priority_rank (no cycles).
+• Within a story, follow bottom-up sequencing: create/initialize → wire controllers/state/persistence → render → UX/diagnostics.
+• Non-prescriptive: **do not** specify file paths, file extensions, frameworks, libraries, tools, or commands.
+• If acceptance criteria (gherkin) are provided, align tasks to satisfy them with minimal work.
+
+STRICT OUTPUT RULES:
+• Return **JSON ONLY** conforming to TaskDraft.
+• Required per task: title, description, priority_rank (int, 1 = highest), depends_on.
+• story_title MUST equal the provided story_title exactly.
+• Titles should be short outcome statements; descriptions clarify **what changes** should exist after completion, not how.
+
+EXEMPLAR / FEEDBACK HINTS (optional):
+• The exemplar may contain prior feedback (e.g., critiques about cost bloat, too many tasks, excessive tool usage).
+• Use it as guidance to reduce bloat and improve ordering/dependencies for THIS story.
+• Do NOT copy exemplar content. Do NOT quote or repeat any feedback text in your output.
+--- EXEMPLAR START ---
+
+--- EXEMPLAR END ---
+HUMAN:
+Story context:
+- story_title: Implement AIPlayer recordShotResult and reset in modules/AIPlayer.js
+- description: Update recordShotResult(x,y,result) to add 'x,y' string to shotHistory set, reset() to clear shotHistory set; done when recording shot results and calling calculateShot avoids recorded coordinates, and calling reset() allows previously tried coordinates to be selected again.
+- epic_title: AI opponent logic
+- relevant_interfaces (optional): GameController:startNewGame() -> void; handlePlayerShot(x, y) -> void; triggerAITurn() -> void; checkGameOver() -> GameState; resetGame() -> void; getCurrentState() -> GameState, Board:placeShip(ship, x, y, orientation) -> boolean; receiveShot(x, y) -> ShotResult; getAllShips() -> Ship[]; isFleetDestroyed() -> boolean; getCellState(x, y) -> CellState; clearBoard() -> void, Ship:constructor(length, name); setPosition(x, y, orientation) -> void; recordHit(segmentIndex) -> void; isSunk() -> boolean; getOccupiedCoordinates() -> Coordinate[], AIPlayer:calculateShot(opponentBoardState) -> Coordinate; recordShotResult(x, y, result) -> void; reset() -> void, UIRenderer:renderBoards(humanBoard, aiBoard, revealAI) -> void; showMessage(text, type) -> void; enablePlacementMode(onPlace, onRandomize) -> void; enableShootingMode(onShot) -> void; disableInteraction() -> void; updateTurnIndicator(state) -> void; showGameOverModal(winner) -> void; highlightCell(boardId, x, y, state) -> void, PlacementValidator:isValidPlacement(board, ship, x, y, orientation) -> ValidationResult; generateRandomPlacement(board, ship) -> Placement; placeFleetRandomly(board, fleet) -> boolean, TypesModule:exports ShotResult = {MISS, HIT, SUNK}; GameState = {PLACEMENT, HUMAN_TURN, AI_TURN, HUMAN_WIN, AI_WIN}; Orientation = {HORIZONTAL, VERTICAL}; CellState = {EMPTY, SHIP, MISS, HIT}; Coordinate = {x: number, y: number}
+- acceptance_criteria_gherkin (optional): 
+Return JSON ONLY.
+
+====================================================================================================
+RUN=f3b68a63-abc1-43df-b2b8-6f19a647c904  PHASE=planning  AGENT=tech_writer_tasks
+====================================================================================================
+
+SYSTEM:
+You are a Technical Writer generating the **smallest sufficient** list of atomic implementation tasks for a single story.
+
+BEHAVIORAL CONTRACT:
+• Minimize: use the fewest tasks needed; if the story is already satisfied, return **zero** tasks.
+• Avoid tool-churn: do NOT create tasks like “research”, “investigate”, “spike”, “choose library”, “set up tooling”,
+  “add logging everywhere”, or “refactor for cleanliness” unless the story explicitly requires it.
+• Atomicity: one concrete outcome per task (create/update/wire/integrate/persist/handle/remove). No multi-step blends.
+• Ordering (authoritative): every task MUST include priority_rank (1..K, gap-free, 1 = highest); the app will **not** reorder.
+• Dependencies: include depends_on only for true prerequisites within the same story; use exact task titles.
+• Dependency correctness: depends_on must reference tasks that exist AND appear earlier in priority_rank (no cycles).
+• Within a story, follow bottom-up sequencing: create/initialize → wire controllers/state/persistence → render → UX/diagnostics.
+• Non-prescriptive: **do not** specify file paths, file extensions, frameworks, libraries, tools, or commands.
+• If acceptance criteria (gherkin) are provided, align tasks to satisfy them with minimal work.
+
+STRICT OUTPUT RULES:
+• Return **JSON ONLY** conforming to TaskDraft.
+• Required per task: title, description, priority_rank (int, 1 = highest), depends_on.
+• story_title MUST equal the provided story_title exactly.
+• Titles should be short outcome statements; descriptions clarify **what changes** should exist after completion, not how.
+
+EXEMPLAR / FEEDBACK HINTS (optional):
+• The exemplar may contain prior feedback (e.g., critiques about cost bloat, too many tasks, excessive tool usage).
+• Use it as guidance to reduce bloat and improve ordering/dependencies for THIS story.
+• Do NOT copy exemplar content. Do NOT quote or repeat any feedback text in your output.
+--- EXEMPLAR START ---
+
+--- EXEMPLAR END ---
+HUMAN:
+Story context:
+- story_title: Wire GameController triggerAITurn to process AI shot and return to human turn in modules/GameController.js
+- description: Update triggerAITurn() to check currentState===AI_TURN, call aiPlayer.calculateShot(humanBoard), call humanBoard.receiveShot, call aiPlayer.recordShotResult, display result via uiRenderer.showMessage, call uiRenderer.renderBoards, check checkGameOver(), if not over set currentState=HUMAN_TURN and call uiRenderer.enableShootingMode; done when AI turn fires at human board, displays result, re-enables human shooting, and manual console check confirms human board state updated.
+- epic_title: Game lifecycle and win/loss detection
+- relevant_interfaces (optional): GameController:startNewGame() -> void; handlePlayerShot(x, y) -> void; triggerAITurn() -> void; checkGameOver() -> GameState; resetGame() -> void; getCurrentState() -> GameState, Board:placeShip(ship, x, y, orientation) -> boolean; receiveShot(x, y) -> ShotResult; getAllShips() -> Ship[]; isFleetDestroyed() -> boolean; getCellState(x, y) -> CellState; clearBoard() -> void, Ship:constructor(length, name); setPosition(x, y, orientation) -> void; recordHit(segmentIndex) -> void; isSunk() -> boolean; getOccupiedCoordinates() -> Coordinate[], AIPlayer:calculateShot(opponentBoardState) -> Coordinate; recordShotResult(x, y, result) -> void; reset() -> void, UIRenderer:renderBoards(humanBoard, aiBoard, revealAI) -> void; showMessage(text, type) -> void; enablePlacementMode(onPlace, onRandomize) -> void; enableShootingMode(onShot) -> void; disableInteraction() -> void; updateTurnIndicator(state) -> void; showGameOverModal(winner) -> void; highlightCell(boardId, x, y, state) -> void, PlacementValidator:isValidPlacement(board, ship, x, y, orientation) -> ValidationResult; generateRandomPlacement(board, ship) -> Placement; placeFleetRandomly(board, fleet) -> boolean, TypesModule:exports ShotResult = {MISS, HIT, SUNK}; GameState = {PLACEMENT, HUMAN_TURN, AI_TURN, HUMAN_WIN, AI_WIN}; Orientation = {HORIZONTAL, VERTICAL}; CellState = {EMPTY, SHIP, MISS, HIT}; Coordinate = {x: number, y: number}
+- acceptance_criteria_gherkin (optional): 
+Return JSON ONLY.
+
+====================================================================================================
+RUN=f3b68a63-abc1-43df-b2b8-6f19a647c904  PHASE=planning  AGENT=tech_writer_tasks
+====================================================================================================
+
+SYSTEM:
+You are a Technical Writer generating the **smallest sufficient** list of atomic implementation tasks for a single story.
+
+BEHAVIORAL CONTRACT:
+• Minimize: use the fewest tasks needed; if the story is already satisfied, return **zero** tasks.
+• Avoid tool-churn: do NOT create tasks like “research”, “investigate”, “spike”, “choose library”, “set up tooling”,
+  “add logging everywhere”, or “refactor for cleanliness” unless the story explicitly requires it.
+• Atomicity: one concrete outcome per task (create/update/wire/integrate/persist/handle/remove). No multi-step blends.
+• Ordering (authoritative): every task MUST include priority_rank (1..K, gap-free, 1 = highest); the app will **not** reorder.
+• Dependencies: include depends_on only for true prerequisites within the same story; use exact task titles.
+• Dependency correctness: depends_on must reference tasks that exist AND appear earlier in priority_rank (no cycles).
+• Within a story, follow bottom-up sequencing: create/initialize → wire controllers/state/persistence → render → UX/diagnostics.
+• Non-prescriptive: **do not** specify file paths, file extensions, frameworks, libraries, tools, or commands.
+• If acceptance criteria (gherkin) are provided, align tasks to satisfy them with minimal work.
+
+STRICT OUTPUT RULES:
+• Return **JSON ONLY** conforming to TaskDraft.
+• Required per task: title, description, priority_rank (int, 1 = highest), depends_on.
+• story_title MUST equal the provided story_title exactly.
+• Titles should be short outcome statements; descriptions clarify **what changes** should exist after completion, not how.
+
+EXEMPLAR / FEEDBACK HINTS (optional):
+• The exemplar may contain prior feedback (e.g., critiques about cost bloat, too many tasks, excessive tool usage).
+• Use it as guidance to reduce bloat and improve ordering/dependencies for THIS story.
+• Do NOT copy exemplar content. Do NOT quote or repeat any feedback text in your output.
+--- EXEMPLAR START ---
+
+--- EXEMPLAR END ---
+HUMAN:
+Story context:
+- story_title: Wire UIRenderer new game button and add reset button to UI in modules/UIRenderer.js and index.html
+- description: Update UIRenderer constructor to accept onReset callback, bind 'New Game' button in modal to onReset, add 'Reset' button to main UI that calls onReset; update index.html to pass GameController.resetGame as onReset callback; done when clicking 'New Game' in modal or 'Reset' button during play calls resetGame() and returns to placement phase.
+- epic_title: Reset and new game flow
+- relevant_interfaces (optional): GameController:startNewGame() -> void; handlePlayerShot(x, y) -> void; triggerAITurn() -> void; checkGameOver() -> GameState; resetGame() -> void; getCurrentState() -> GameState, Board:placeShip(ship, x, y, orientation) -> boolean; receiveShot(x, y) -> ShotResult; getAllShips() -> Ship[]; isFleetDestroyed() -> boolean; getCellState(x, y) -> CellState; clearBoard() -> void, Ship:constructor(length, name); setPosition(x, y, orientation) -> void; recordHit(segmentIndex) -> void; isSunk() -> boolean; getOccupiedCoordinates() -> Coordinate[], AIPlayer:calculateShot(opponentBoardState) -> Coordinate; recordShotResult(x, y, result) -> void; reset() -> void, UIRenderer:renderBoards(humanBoard, aiBoard, revealAI) -> void; showMessage(text, type) -> void; enablePlacementMode(onPlace, onRandomize) -> void; enableShootingMode(onShot) -> void; disableInteraction() -> void; updateTurnIndicator(state) -> void; showGameOverModal(winner) -> void; highlightCell(boardId, x, y, state) -> void, PlacementValidator:isValidPlacement(board, ship, x, y, orientation) -> ValidationResult; generateRandomPlacement(board, ship) -> Placement; placeFleetRandomly(board, fleet) -> boolean, TypesModule:exports ShotResult = {MISS, HIT, SUNK}; GameState = {PLACEMENT, HUMAN_TURN, AI_TURN, HUMAN_WIN, AI_WIN}; Orientation = {HORIZONTAL, VERTICAL}; CellState = {EMPTY, SHIP, MISS, HIT}; Coordinate = {x: number, y: number}
+- acceptance_criteria_gherkin (optional): 
+Return JSON ONLY.
+
+====================================================================================================
+RUN=f3b68a63-abc1-43df-b2b8-6f19a647c904  PHASE=planning  AGENT=tech_writer_tasks
+====================================================================================================
+
+SYSTEM:
+You are a Technical Writer generating the **smallest sufficient** list of atomic implementation tasks for a single story.
+
+BEHAVIORAL CONTRACT:
+• Minimize: use the fewest tasks needed; if the story is already satisfied, return **zero** tasks.
+• Avoid tool-churn: do NOT create tasks like “research”, “investigate”, “spike”, “choose library”, “set up tooling”,
+  “add logging everywhere”, or “refactor for cleanliness” unless the story explicitly requires it.
+• Atomicity: one concrete outcome per task (create/update/wire/integrate/persist/handle/remove). No multi-step blends.
+• Ordering (authoritative): every task MUST include priority_rank (1..K, gap-free, 1 = highest); the app will **not** reorder.
+• Dependencies: include depends_on only for true prerequisites within the same story; use exact task titles.
+• Dependency correctness: depends_on must reference tasks that exist AND appear earlier in priority_rank (no cycles).
+• Within a story, follow bottom-up sequencing: create/initialize → wire controllers/state/persistence → render → UX/diagnostics.
+• Non-prescriptive: **do not** specify file paths, file extensions, frameworks, libraries, tools, or commands.
+• If acceptance criteria (gherkin) are provided, align tasks to satisfy them with minimal work.
+
+STRICT OUTPUT RULES:
+• Return **JSON ONLY** conforming to TaskDraft.
+• Required per task: title, description, priority_rank (int, 1 = highest), depends_on.
+• story_title MUST equal the provided story_title exactly.
+• Titles should be short outcome statements; descriptions clarify **what changes** should exist after completion, not how.
+
+EXEMPLAR / FEEDBACK HINTS (optional):
+• The exemplar may contain prior feedback (e.g., critiques about cost bloat, too many tasks, excessive tool usage).
+• Use it as guidance to reduce bloat and improve ordering/dependencies for THIS story.
+• Do NOT copy exemplar content. Do NOT quote or repeat any feedback text in your output.
+--- EXEMPLAR START ---
+
+--- EXEMPLAR END ---
+HUMAN:
+Story context:
+- story_title: Create Ship class with constructor and minimal methods in modules/Ship.js
+- description: Implement constructor(length, name), setPosition(x,y,orientation) storing coordinates, recordHit(segmentIndex) marking hit array, isSunk() checking all segments hit, getOccupiedCoordinates() returning coordinate array; done when instantiating Ship(3,'Cruiser') and calling methods logs expected values.
+- epic_title: App scaffold (baseline)
+- relevant_interfaces (optional): GameController:startNewGame() -> void; handlePlayerShot(x, y) -> void; triggerAITurn() -> void; checkGameOver() -> GameState; resetGame() -> void; getCurrentState() -> GameState, Board:placeShip(ship, x, y, orientation) -> boolean; receiveShot(x, y) -> ShotResult; getAllShips() -> Ship[]; isFleetDestroyed() -> boolean; getCellState(x, y) -> CellState; clearBoard() -> void, Ship:constructor(length, name); setPosition(x, y, orientation) -> void; recordHit(segmentIndex) -> void; isSunk() -> boolean; getOccupiedCoordinates() -> Coordinate[], AIPlayer:calculateShot(opponentBoardState) -> Coordinate; recordShotResult(x, y, result) -> void; reset() -> void, UIRenderer:renderBoards(humanBoard, aiBoard, revealAI) -> void; showMessage(text, type) -> void; enablePlacementMode(onPlace, onRandomize) -> void; enableShootingMode(onShot) -> void; disableInteraction() -> void; updateTurnIndicator(state) -> void; showGameOverModal(winner) -> void; highlightCell(boardId, x, y, state) -> void, PlacementValidator:isValidPlacement(board, ship, x, y, orientation) -> ValidationResult; generateRandomPlacement(board, ship) -> Placement; placeFleetRandomly(board, fleet) -> boolean, TypesModule:exports ShotResult = {MISS, HIT, SUNK}; GameState = {PLACEMENT, HUMAN_TURN, AI_TURN, HUMAN_WIN, AI_WIN}; Orientation = {HORIZONTAL, VERTICAL}; CellState = {EMPTY, SHIP, MISS, HIT}; Coordinate = {x: number, y: number}
+- acceptance_criteria_gherkin (optional): 
+Return JSON ONLY.
+
+====================================================================================================
+RUN=f3b68a63-abc1-43df-b2b8-6f19a647c904  PHASE=planning  AGENT=tech_writer_tasks
+====================================================================================================
+
+SYSTEM:
+You are a Technical Writer generating the **smallest sufficient** list of atomic implementation tasks for a single story.
+
+BEHAVIORAL CONTRACT:
+• Minimize: use the fewest tasks needed; if the story is already satisfied, return **zero** tasks.
+• Avoid tool-churn: do NOT create tasks like “research”, “investigate”, “spike”, “choose library”, “set up tooling”,
+  “add logging everywhere”, or “refactor for cleanliness” unless the story explicitly requires it.
+• Atomicity: one concrete outcome per task (create/update/wire/integrate/persist/handle/remove). No multi-step blends.
+• Ordering (authoritative): every task MUST include priority_rank (1..K, gap-free, 1 = highest); the app will **not** reorder.
+• Dependencies: include depends_on only for true prerequisites within the same story; use exact task titles.
+• Dependency correctness: depends_on must reference tasks that exist AND appear earlier in priority_rank (no cycles).
+• Within a story, follow bottom-up sequencing: create/initialize → wire controllers/state/persistence → render → UX/diagnostics.
+• Non-prescriptive: **do not** specify file paths, file extensions, frameworks, libraries, tools, or commands.
+• If acceptance criteria (gherkin) are provided, align tasks to satisfy them with minimal work.
+
+STRICT OUTPUT RULES:
+• Return **JSON ONLY** conforming to TaskDraft.
+• Required per task: title, description, priority_rank (int, 1 = highest), depends_on.
+• story_title MUST equal the provided story_title exactly.
+• Titles should be short outcome statements; descriptions clarify **what changes** should exist after completion, not how.
+
+EXEMPLAR / FEEDBACK HINTS (optional):
+• The exemplar may contain prior feedback (e.g., critiques about cost bloat, too many tasks, excessive tool usage).
+• Use it as guidance to reduce bloat and improve ordering/dependencies for THIS story.
+• Do NOT copy exemplar content. Do NOT quote or repeat any feedback text in your output.
+--- EXEMPLAR START ---
+
+--- EXEMPLAR END ---
+HUMAN:
+Story context:
+- story_title: Implement Board receiveShot with hit/miss/sunk logic in modules/Board.js
+- description: Update receiveShot(x,y) to check cell state: if SHIP call ship.recordHit, update cell to HIT, return SUNK if ship.isSunk() else HIT; if EMPTY update cell to MISS and return MISS; prevent duplicate shots by checking existing MISS/HIT; done when firing at ship coordinates returns HIT, then SUNK after all segments hit, and firing at empty cell returns MISS.
+- epic_title: Board and Ship core state management
+- relevant_interfaces (optional): GameController:startNewGame() -> void; handlePlayerShot(x, y) -> void; triggerAITurn() -> void; checkGameOver() -> GameState; resetGame() -> void; getCurrentState() -> GameState, Board:placeShip(ship, x, y, orientation) -> boolean; receiveShot(x, y) -> ShotResult; getAllShips() -> Ship[]; isFleetDestroyed() -> boolean; getCellState(x, y) -> CellState; clearBoard() -> void, Ship:constructor(length, name); setPosition(x, y, orientation) -> void; recordHit(segmentIndex) -> void; isSunk() -> boolean; getOccupiedCoordinates() -> Coordinate[], AIPlayer:calculateShot(opponentBoardState) -> Coordinate; recordShotResult(x, y, result) -> void; reset() -> void, UIRenderer:renderBoards(humanBoard, aiBoard, revealAI) -> void; showMessage(text, type) -> void; enablePlacementMode(onPlace, onRandomize) -> void; enableShootingMode(onShot) -> void; disableInteraction() -> void; updateTurnIndicator(state) -> void; showGameOverModal(winner) -> void; highlightCell(boardId, x, y, state) -> void, PlacementValidator:isValidPlacement(board, ship, x, y, orientation) -> ValidationResult; generateRandomPlacement(board, ship) -> Placement; placeFleetRandomly(board, fleet) -> boolean, TypesModule:exports ShotResult = {MISS, HIT, SUNK}; GameState = {PLACEMENT, HUMAN_TURN, AI_TURN, HUMAN_WIN, AI_WIN}; Orientation = {HORIZONTAL, VERTICAL}; CellState = {EMPTY, SHIP, MISS, HIT}; Coordinate = {x: number, y: number}
+- acceptance_criteria_gherkin (optional): 
+Return JSON ONLY.
+
+====================================================================================================
+RUN=f3b68a63-abc1-43df-b2b8-6f19a647c904  PHASE=planning  AGENT=tech_writer_tasks
+====================================================================================================
+
+SYSTEM:
+You are a Technical Writer generating the **smallest sufficient** list of atomic implementation tasks for a single story.
+
+BEHAVIORAL CONTRACT:
+• Minimize: use the fewest tasks needed; if the story is already satisfied, return **zero** tasks.
+• Avoid tool-churn: do NOT create tasks like “research”, “investigate”, “spike”, “choose library”, “set up tooling”,
+  “add logging everywhere”, or “refactor for cleanliness” unless the story explicitly requires it.
+• Atomicity: one concrete outcome per task (create/update/wire/integrate/persist/handle/remove). No multi-step blends.
+• Ordering (authoritative): every task MUST include priority_rank (1..K, gap-free, 1 = highest); the app will **not** reorder.
+• Dependencies: include depends_on only for true prerequisites within the same story; use exact task titles.
+• Dependency correctness: depends_on must reference tasks that exist AND appear earlier in priority_rank (no cycles).
+• Within a story, follow bottom-up sequencing: create/initialize → wire controllers/state/persistence → render → UX/diagnostics.
+• Non-prescriptive: **do not** specify file paths, file extensions, frameworks, libraries, tools, or commands.
+• If acceptance criteria (gherkin) are provided, align tasks to satisfy them with minimal work.
+
+STRICT OUTPUT RULES:
+• Return **JSON ONLY** conforming to TaskDraft.
+• Required per task: title, description, priority_rank (int, 1 = highest), depends_on.
+• story_title MUST equal the provided story_title exactly.
+• Titles should be short outcome statements; descriptions clarify **what changes** should exist after completion, not how.
+
+EXEMPLAR / FEEDBACK HINTS (optional):
+• The exemplar may contain prior feedback (e.g., critiques about cost bloat, too many tasks, excessive tool usage).
+• Use it as guidance to reduce bloat and improve ordering/dependencies for THIS story.
+• Do NOT copy exemplar content. Do NOT quote or repeat any feedback text in your output.
+--- EXEMPLAR START ---
+
+--- EXEMPLAR END ---
+HUMAN:
+Story context:
+- story_title: Implement PlacementValidator placeFleetRandomly in modules/PlacementValidator.js
+- description: Implement placeFleetRandomly(board,fleet) to iterate fleet array [Carrier(5),Battleship(4),Cruiser(3),Submarine(3),Destroyer(2)], call generateRandomPlacement for each, call board.placeShip if valid, return false and clear board if any ship fails; done when calling placeFleetRandomly on empty board places all 5 ships and returns true, verified by board.getAllShips().length === 5.
+- epic_title: Placement validation and randomization
+- relevant_interfaces (optional): GameController:startNewGame() -> void; handlePlayerShot(x, y) -> void; triggerAITurn() -> void; checkGameOver() -> GameState; resetGame() -> void; getCurrentState() -> GameState, Board:placeShip(ship, x, y, orientation) -> boolean; receiveShot(x, y) -> ShotResult; getAllShips() -> Ship[]; isFleetDestroyed() -> boolean; getCellState(x, y) -> CellState; clearBoard() -> void, Ship:constructor(length, name); setPosition(x, y, orientation) -> void; recordHit(segmentIndex) -> void; isSunk() -> boolean; getOccupiedCoordinates() -> Coordinate[], AIPlayer:calculateShot(opponentBoardState) -> Coordinate; recordShotResult(x, y, result) -> void; reset() -> void, UIRenderer:renderBoards(humanBoard, aiBoard, revealAI) -> void; showMessage(text, type) -> void; enablePlacementMode(onPlace, onRandomize) -> void; enableShootingMode(onShot) -> void; disableInteraction() -> void; updateTurnIndicator(state) -> void; showGameOverModal(winner) -> void; highlightCell(boardId, x, y, state) -> void, PlacementValidator:isValidPlacement(board, ship, x, y, orientation) -> ValidationResult; generateRandomPlacement(board, ship) -> Placement; placeFleetRandomly(board, fleet) -> boolean, TypesModule:exports ShotResult = {MISS, HIT, SUNK}; GameState = {PLACEMENT, HUMAN_TURN, AI_TURN, HUMAN_WIN, AI_WIN}; Orientation = {HORIZONTAL, VERTICAL}; CellState = {EMPTY, SHIP, MISS, HIT}; Coordinate = {x: number, y: number}
+- acceptance_criteria_gherkin (optional): 
+Return JSON ONLY.
+
+====================================================================================================
+RUN=f3b68a63-abc1-43df-b2b8-6f19a647c904  PHASE=planning  AGENT=tech_writer_tasks
+====================================================================================================
+
+SYSTEM:
+You are a Technical Writer generating the **smallest sufficient** list of atomic implementation tasks for a single story.
+
+BEHAVIORAL CONTRACT:
+• Minimize: use the fewest tasks needed; if the story is already satisfied, return **zero** tasks.
+• Avoid tool-churn: do NOT create tasks like “research”, “investigate”, “spike”, “choose library”, “set up tooling”,
+  “add logging everywhere”, or “refactor for cleanliness” unless the story explicitly requires it.
+• Atomicity: one concrete outcome per task (create/update/wire/integrate/persist/handle/remove). No multi-step blends.
+• Ordering (authoritative): every task MUST include priority_rank (1..K, gap-free, 1 = highest); the app will **not** reorder.
+• Dependencies: include depends_on only for true prerequisites within the same story; use exact task titles.
+• Dependency correctness: depends_on must reference tasks that exist AND appear earlier in priority_rank (no cycles).
+• Within a story, follow bottom-up sequencing: create/initialize → wire controllers/state/persistence → render → UX/diagnostics.
+• Non-prescriptive: **do not** specify file paths, file extensions, frameworks, libraries, tools, or commands.
+• If acceptance criteria (gherkin) are provided, align tasks to satisfy them with minimal work.
+
+STRICT OUTPUT RULES:
+• Return **JSON ONLY** conforming to TaskDraft.
+• Required per task: title, description, priority_rank (int, 1 = highest), depends_on.
+• story_title MUST equal the provided story_title exactly.
+• Titles should be short outcome statements; descriptions clarify **what changes** should exist after completion, not how.
+
+EXEMPLAR / FEEDBACK HINTS (optional):
+• The exemplar may contain prior feedback (e.g., critiques about cost bloat, too many tasks, excessive tool usage).
+• Use it as guidance to reduce bloat and improve ordering/dependencies for THIS story.
+• Do NOT copy exemplar content. Do NOT quote or repeat any feedback text in your output.
+--- EXEMPLAR START ---
+
+--- EXEMPLAR END ---
+HUMAN:
+Story context:
+- story_title: Implement UIRenderer renderBoards to display ship positions and cell states in modules/UIRenderer.js
+- description: Update renderBoards(humanBoard,aiBoard,revealAI) to iterate 10×10 cells for each board, call board.getCellState(x,y), apply CSS class for EMPTY/SHIP/MISS/HIT, hide SHIP cells on AI board if revealAI=false, show ship names on human board cells; done when placing ships manually and calling renderBoards shows ships on human grid, empty cells on AI grid, and firing shots updates cell classes to show MISS/HIT markers.
+- epic_title: Manual fleet placement UI
+- relevant_interfaces (optional): GameController:startNewGame() -> void; handlePlayerShot(x, y) -> void; triggerAITurn() -> void; checkGameOver() -> GameState; resetGame() -> void; getCurrentState() -> GameState, Board:placeShip(ship, x, y, orientation) -> boolean; receiveShot(x, y) -> ShotResult; getAllShips() -> Ship[]; isFleetDestroyed() -> boolean; getCellState(x, y) -> CellState; clearBoard() -> void, Ship:constructor(length, name); setPosition(x, y, orientation) -> void; recordHit(segmentIndex) -> void; isSunk() -> boolean; getOccupiedCoordinates() -> Coordinate[], AIPlayer:calculateShot(opponentBoardState) -> Coordinate; recordShotResult(x, y, result) -> void; reset() -> void, UIRenderer:renderBoards(humanBoard, aiBoard, revealAI) -> void; showMessage(text, type) -> void; enablePlacementMode(onPlace, onRandomize) -> void; enableShootingMode(onShot) -> void; disableInteraction() -> void; updateTurnIndicator(state) -> void; showGameOverModal(winner) -> void; highlightCell(boardId, x, y, state) -> void, PlacementValidator:isValidPlacement(board, ship, x, y, orientation) -> ValidationResult; generateRandomPlacement(board, ship) -> Placement; placeFleetRandomly(board, fleet) -> boolean, TypesModule:exports ShotResult = {MISS, HIT, SUNK}; GameState = {PLACEMENT, HUMAN_TURN, AI_TURN, HUMAN_WIN, AI_WIN}; Orientation = {HORIZONTAL, VERTICAL}; CellState = {EMPTY, SHIP, MISS, HIT}; Coordinate = {x: number, y: number}
+- acceptance_criteria_gherkin (optional): 
+Return JSON ONLY.
+
+====================================================================================================
+RUN=f3b68a63-abc1-43df-b2b8-6f19a647c904  PHASE=planning  AGENT=tech_writer_tasks
+====================================================================================================
+
+SYSTEM:
+You are a Technical Writer generating the **smallest sufficient** list of atomic implementation tasks for a single story.
+
+BEHAVIORAL CONTRACT:
+• Minimize: use the fewest tasks needed; if the story is already satisfied, return **zero** tasks.
+• Avoid tool-churn: do NOT create tasks like “research”, “investigate”, “spike”, “choose library”, “set up tooling”,
+  “add logging everywhere”, or “refactor for cleanliness” unless the story explicitly requires it.
+• Atomicity: one concrete outcome per task (create/update/wire/integrate/persist/handle/remove). No multi-step blends.
+• Ordering (authoritative): every task MUST include priority_rank (1..K, gap-free, 1 = highest); the app will **not** reorder.
+• Dependencies: include depends_on only for true prerequisites within the same story; use exact task titles.
+• Dependency correctness: depends_on must reference tasks that exist AND appear earlier in priority_rank (no cycles).
+• Within a story, follow bottom-up sequencing: create/initialize → wire controllers/state/persistence → render → UX/diagnostics.
+• Non-prescriptive: **do not** specify file paths, file extensions, frameworks, libraries, tools, or commands.
+• If acceptance criteria (gherkin) are provided, align tasks to satisfy them with minimal work.
+
+STRICT OUTPUT RULES:
+• Return **JSON ONLY** conforming to TaskDraft.
+• Required per task: title, description, priority_rank (int, 1 = highest), depends_on.
+• story_title MUST equal the provided story_title exactly.
+• Titles should be short outcome statements; descriptions clarify **what changes** should exist after completion, not how.
+
+EXEMPLAR / FEEDBACK HINTS (optional):
+• The exemplar may contain prior feedback (e.g., critiques about cost bloat, too many tasks, excessive tool usage).
+• Use it as guidance to reduce bloat and improve ordering/dependencies for THIS story.
+• Do NOT copy exemplar content. Do NOT quote or repeat any feedback text in your output.
+--- EXEMPLAR START ---
+
+--- EXEMPLAR END ---
+HUMAN:
+Story context:
+- story_title: Implement UIRenderer showMessage and updateTurnIndicator in modules/UIRenderer.js
+- description: Implement showMessage(text,type) to display text in status div with CSS class for type (info/success/error), updateTurnIndicator(state) to display 'Your Turn' for HUMAN_TURN, 'AI Turn' for AI_TURN, 'Place Your Fleet' for PLACEMENT; done when calling showMessage displays text in UI, and calling updateTurnIndicator updates turn label.
+- epic_title: Human shooting and turn flow
+- relevant_interfaces (optional): GameController:startNewGame() -> void; handlePlayerShot(x, y) -> void; triggerAITurn() -> void; checkGameOver() -> GameState; resetGame() -> void; getCurrentState() -> GameState, Board:placeShip(ship, x, y, orientation) -> boolean; receiveShot(x, y) -> ShotResult; getAllShips() -> Ship[]; isFleetDestroyed() -> boolean; getCellState(x, y) -> CellState; clearBoard() -> void, Ship:constructor(length, name); setPosition(x, y, orientation) -> void; recordHit(segmentIndex) -> void; isSunk() -> boolean; getOccupiedCoordinates() -> Coordinate[], AIPlayer:calculateShot(opponentBoardState) -> Coordinate; recordShotResult(x, y, result) -> void; reset() -> void, UIRenderer:renderBoards(humanBoard, aiBoard, revealAI) -> void; showMessage(text, type) -> void; enablePlacementMode(onPlace, onRandomize) -> void; enableShootingMode(onShot) -> void; disableInteraction() -> void; updateTurnIndicator(state) -> void; showGameOverModal(winner) -> void; highlightCell(boardId, x, y, state) -> void, PlacementValidator:isValidPlacement(board, ship, x, y, orientation) -> ValidationResult; generateRandomPlacement(board, ship) -> Placement; placeFleetRandomly(board, fleet) -> boolean, TypesModule:exports ShotResult = {MISS, HIT, SUNK}; GameState = {PLACEMENT, HUMAN_TURN, AI_TURN, HUMAN_WIN, AI_WIN}; Orientation = {HORIZONTAL, VERTICAL}; CellState = {EMPTY, SHIP, MISS, HIT}; Coordinate = {x: number, y: number}
+- acceptance_criteria_gherkin (optional): 
+Return JSON ONLY.
+
+====================================================================================================
+RUN=f3b68a63-abc1-43df-b2b8-6f19a647c904  PHASE=planning  AGENT=tech_writer_tasks
+====================================================================================================
+
+SYSTEM:
+You are a Technical Writer generating the **smallest sufficient** list of atomic implementation tasks for a single story.
+
+BEHAVIORAL CONTRACT:
+• Minimize: use the fewest tasks needed; if the story is already satisfied, return **zero** tasks.
+• Avoid tool-churn: do NOT create tasks like “research”, “investigate”, “spike”, “choose library”, “set up tooling”,
+  “add logging everywhere”, or “refactor for cleanliness” unless the story explicitly requires it.
+• Atomicity: one concrete outcome per task (create/update/wire/integrate/persist/handle/remove). No multi-step blends.
+• Ordering (authoritative): every task MUST include priority_rank (1..K, gap-free, 1 = highest); the app will **not** reorder.
+• Dependencies: include depends_on only for true prerequisites within the same story; use exact task titles.
+• Dependency correctness: depends_on must reference tasks that exist AND appear earlier in priority_rank (no cycles).
+• Within a story, follow bottom-up sequencing: create/initialize → wire controllers/state/persistence → render → UX/diagnostics.
+• Non-prescriptive: **do not** specify file paths, file extensions, frameworks, libraries, tools, or commands.
+• If acceptance criteria (gherkin) are provided, align tasks to satisfy them with minimal work.
+
+STRICT OUTPUT RULES:
+• Return **JSON ONLY** conforming to TaskDraft.
+• Required per task: title, description, priority_rank (int, 1 = highest), depends_on.
+• story_title MUST equal the provided story_title exactly.
+• Titles should be short outcome statements; descriptions clarify **what changes** should exist after completion, not how.
+
+EXEMPLAR / FEEDBACK HINTS (optional):
+• The exemplar may contain prior feedback (e.g., critiques about cost bloat, too many tasks, excessive tool usage).
+• Use it as guidance to reduce bloat and improve ordering/dependencies for THIS story.
+• Do NOT copy exemplar content. Do NOT quote or repeat any feedback text in your output.
+--- EXEMPLAR START ---
+
+--- EXEMPLAR END ---
+HUMAN:
+Story context:
+- story_title: Implement UIRenderer showGameOverModal with winner display and new game button in modules/UIRenderer.js
+- description: Implement showGameOverModal(winner) to display modal overlay with winner text ('You Win!' or 'AI Wins'), reveal AI board ships, show 'New Game' button that calls onNewGame callback passed to constructor; done when calling showGameOverModal displays modal with winner text and button, and clicking button triggers onNewGame callback.
+- epic_title: Game lifecycle and win/loss detection
+- relevant_interfaces (optional): GameController:startNewGame() -> void; handlePlayerShot(x, y) -> void; triggerAITurn() -> void; checkGameOver() -> GameState; resetGame() -> void; getCurrentState() -> GameState, Board:placeShip(ship, x, y, orientation) -> boolean; receiveShot(x, y) -> ShotResult; getAllShips() -> Ship[]; isFleetDestroyed() -> boolean; getCellState(x, y) -> CellState; clearBoard() -> void, Ship:constructor(length, name); setPosition(x, y, orientation) -> void; recordHit(segmentIndex) -> void; isSunk() -> boolean; getOccupiedCoordinates() -> Coordinate[], AIPlayer:calculateShot(opponentBoardState) -> Coordinate; recordShotResult(x, y, result) -> void; reset() -> void, UIRenderer:renderBoards(humanBoard, aiBoard, revealAI) -> void; showMessage(text, type) -> void; enablePlacementMode(onPlace, onRandomize) -> void; enableShootingMode(onShot) -> void; disableInteraction() -> void; updateTurnIndicator(state) -> void; showGameOverModal(winner) -> void; highlightCell(boardId, x, y, state) -> void, PlacementValidator:isValidPlacement(board, ship, x, y, orientation) -> ValidationResult; generateRandomPlacement(board, ship) -> Placement; placeFleetRandomly(board, fleet) -> boolean, TypesModule:exports ShotResult = {MISS, HIT, SUNK}; GameState = {PLACEMENT, HUMAN_TURN, AI_TURN, HUMAN_WIN, AI_WIN}; Orientation = {HORIZONTAL, VERTICAL}; CellState = {EMPTY, SHIP, MISS, HIT}; Coordinate = {x: number, y: number}
+- acceptance_criteria_gherkin (optional): 
+Return JSON ONLY.
+
+====================================================================================================
+RUN=f3b68a63-abc1-43df-b2b8-6f19a647c904  PHASE=planning  AGENT=tech_writer_tasks
+====================================================================================================
+
+SYSTEM:
+You are a Technical Writer generating the **smallest sufficient** list of atomic implementation tasks for a single story.
+
+BEHAVIORAL CONTRACT:
+• Minimize: use the fewest tasks needed; if the story is already satisfied, return **zero** tasks.
+• Avoid tool-churn: do NOT create tasks like “research”, “investigate”, “spike”, “choose library”, “set up tooling”,
+  “add logging everywhere”, or “refactor for cleanliness” unless the story explicitly requires it.
+• Atomicity: one concrete outcome per task (create/update/wire/integrate/persist/handle/remove). No multi-step blends.
+• Ordering (authoritative): every task MUST include priority_rank (1..K, gap-free, 1 = highest); the app will **not** reorder.
+• Dependencies: include depends_on only for true prerequisites within the same story; use exact task titles.
+• Dependency correctness: depends_on must reference tasks that exist AND appear earlier in priority_rank (no cycles).
+• Within a story, follow bottom-up sequencing: create/initialize → wire controllers/state/persistence → render → UX/diagnostics.
+• Non-prescriptive: **do not** specify file paths, file extensions, frameworks, libraries, tools, or commands.
+• If acceptance criteria (gherkin) are provided, align tasks to satisfy them with minimal work.
+
+STRICT OUTPUT RULES:
+• Return **JSON ONLY** conforming to TaskDraft.
+• Required per task: title, description, priority_rank (int, 1 = highest), depends_on.
+• story_title MUST equal the provided story_title exactly.
+• Titles should be short outcome statements; descriptions clarify **what changes** should exist after completion, not how.
+
+EXEMPLAR / FEEDBACK HINTS (optional):
+• The exemplar may contain prior feedback (e.g., critiques about cost bloat, too many tasks, excessive tool usage).
+• Use it as guidance to reduce bloat and improve ordering/dependencies for THIS story.
+• Do NOT copy exemplar content. Do NOT quote or repeat any feedback text in your output.
+--- EXEMPLAR START ---
+
+--- EXEMPLAR END ---
+HUMAN:
+Story context:
+- story_title: Implement AI fleet placement on game start in modules/GameController.js
+- description: Update startNewGame() to call placementValidator.placeFleetRandomly(aiBoard, fleet) before entering human placement mode; done when starting new game and inspecting aiBoard.getAllShips() shows 5 ships placed, and completing human placement allows immediate shooting at AI board with ships already positioned.
+- epic_title: Reset and new game flow
+- relevant_interfaces (optional): GameController:startNewGame() -> void; handlePlayerShot(x, y) -> void; triggerAITurn() -> void; checkGameOver() -> GameState; resetGame() -> void; getCurrentState() -> GameState, Board:placeShip(ship, x, y, orientation) -> boolean; receiveShot(x, y) -> ShotResult; getAllShips() -> Ship[]; isFleetDestroyed() -> boolean; getCellState(x, y) -> CellState; clearBoard() -> void, Ship:constructor(length, name); setPosition(x, y, orientation) -> void; recordHit(segmentIndex) -> void; isSunk() -> boolean; getOccupiedCoordinates() -> Coordinate[], AIPlayer:calculateShot(opponentBoardState) -> Coordinate; recordShotResult(x, y, result) -> void; reset() -> void, UIRenderer:renderBoards(humanBoard, aiBoard, revealAI) -> void; showMessage(text, type) -> void; enablePlacementMode(onPlace, onRandomize) -> void; enableShootingMode(onShot) -> void; disableInteraction() -> void; updateTurnIndicator(state) -> void; showGameOverModal(winner) -> void; highlightCell(boardId, x, y, state) -> void, PlacementValidator:isValidPlacement(board, ship, x, y, orientation) -> ValidationResult; generateRandomPlacement(board, ship) -> Placement; placeFleetRandomly(board, fleet) -> boolean, TypesModule:exports ShotResult = {MISS, HIT, SUNK}; GameState = {PLACEMENT, HUMAN_TURN, AI_TURN, HUMAN_WIN, AI_WIN}; Orientation = {HORIZONTAL, VERTICAL}; CellState = {EMPTY, SHIP, MISS, HIT}; Coordinate = {x: number, y: number}
+- acceptance_criteria_gherkin (optional): 
+Return JSON ONLY.
+
+====================================================================================================
+RUN=f3b68a63-abc1-43df-b2b8-6f19a647c904  PHASE=planning  AGENT=tech_writer_tasks
+====================================================================================================
+
+SYSTEM:
+You are a Technical Writer generating the **smallest sufficient** list of atomic implementation tasks for a single story.
+
+BEHAVIORAL CONTRACT:
+• Minimize: use the fewest tasks needed; if the story is already satisfied, return **zero** tasks.
+• Avoid tool-churn: do NOT create tasks like “research”, “investigate”, “spike”, “choose library”, “set up tooling”,
+  “add logging everywhere”, or “refactor for cleanliness” unless the story explicitly requires it.
+• Atomicity: one concrete outcome per task (create/update/wire/integrate/persist/handle/remove). No multi-step blends.
+• Ordering (authoritative): every task MUST include priority_rank (1..K, gap-free, 1 = highest); the app will **not** reorder.
+• Dependencies: include depends_on only for true prerequisites within the same story; use exact task titles.
+• Dependency correctness: depends_on must reference tasks that exist AND appear earlier in priority_rank (no cycles).
+• Within a story, follow bottom-up sequencing: create/initialize → wire controllers/state/persistence → render → UX/diagnostics.
+• Non-prescriptive: **do not** specify file paths, file extensions, frameworks, libraries, tools, or commands.
+• If acceptance criteria (gherkin) are provided, align tasks to satisfy them with minimal work.
+
+STRICT OUTPUT RULES:
+• Return **JSON ONLY** conforming to TaskDraft.
+• Required per task: title, description, priority_rank (int, 1 = highest), depends_on.
+• story_title MUST equal the provided story_title exactly.
+• Titles should be short outcome statements; descriptions clarify **what changes** should exist after completion, not how.
+
+EXEMPLAR / FEEDBACK HINTS (optional):
+• The exemplar may contain prior feedback (e.g., critiques about cost bloat, too many tasks, excessive tool usage).
+• Use it as guidance to reduce bloat and improve ordering/dependencies for THIS story.
+• Do NOT copy exemplar content. Do NOT quote or repeat any feedback text in your output.
+--- EXEMPLAR START ---
+
+--- EXEMPLAR END ---
+HUMAN:
+Story context:
+- story_title: Create Board class with constructor and minimal methods in modules/Board.js
+- description: Implement constructor initializing 10×10 grid array, placeShip(ship,x,y,orientation) storing ship reference in cells, receiveShot(x,y) returning ShotResult and updating cell state, getAllShips() returning ship array, isFleetDestroyed() checking all ships sunk, getCellState(x,y), clearBoard(); done when Board instance can place a ship and receive a shot with correct ShotResult logged.
+- epic_title: App scaffold (baseline)
+- relevant_interfaces (optional): GameController:startNewGame() -> void; handlePlayerShot(x, y) -> void; triggerAITurn() -> void; checkGameOver() -> GameState; resetGame() -> void; getCurrentState() -> GameState, Board:placeShip(ship, x, y, orientation) -> boolean; receiveShot(x, y) -> ShotResult; getAllShips() -> Ship[]; isFleetDestroyed() -> boolean; getCellState(x, y) -> CellState; clearBoard() -> void, Ship:constructor(length, name); setPosition(x, y, orientation) -> void; recordHit(segmentIndex) -> void; isSunk() -> boolean; getOccupiedCoordinates() -> Coordinate[], AIPlayer:calculateShot(opponentBoardState) -> Coordinate; recordShotResult(x, y, result) -> void; reset() -> void, UIRenderer:renderBoards(humanBoard, aiBoard, revealAI) -> void; showMessage(text, type) -> void; enablePlacementMode(onPlace, onRandomize) -> void; enableShootingMode(onShot) -> void; disableInteraction() -> void; updateTurnIndicator(state) -> void; showGameOverModal(winner) -> void; highlightCell(boardId, x, y, state) -> void, PlacementValidator:isValidPlacement(board, ship, x, y, orientation) -> ValidationResult; generateRandomPlacement(board, ship) -> Placement; placeFleetRandomly(board, fleet) -> boolean, TypesModule:exports ShotResult = {MISS, HIT, SUNK}; GameState = {PLACEMENT, HUMAN_TURN, AI_TURN, HUMAN_WIN, AI_WIN}; Orientation = {HORIZONTAL, VERTICAL}; CellState = {EMPTY, SHIP, MISS, HIT}; Coordinate = {x: number, y: number}
+- acceptance_criteria_gherkin (optional): 
+Return JSON ONLY.
+
+====================================================================================================
+RUN=f3b68a63-abc1-43df-b2b8-6f19a647c904  PHASE=planning  AGENT=tech_writer_tasks
+====================================================================================================
+
+SYSTEM:
+You are a Technical Writer generating the **smallest sufficient** list of atomic implementation tasks for a single story.
+
+BEHAVIORAL CONTRACT:
+• Minimize: use the fewest tasks needed; if the story is already satisfied, return **zero** tasks.
+• Avoid tool-churn: do NOT create tasks like “research”, “investigate”, “spike”, “choose library”, “set up tooling”,
+  “add logging everywhere”, or “refactor for cleanliness” unless the story explicitly requires it.
+• Atomicity: one concrete outcome per task (create/update/wire/integrate/persist/handle/remove). No multi-step blends.
+• Ordering (authoritative): every task MUST include priority_rank (1..K, gap-free, 1 = highest); the app will **not** reorder.
+• Dependencies: include depends_on only for true prerequisites within the same story; use exact task titles.
+• Dependency correctness: depends_on must reference tasks that exist AND appear earlier in priority_rank (no cycles).
+• Within a story, follow bottom-up sequencing: create/initialize → wire controllers/state/persistence → render → UX/diagnostics.
+• Non-prescriptive: **do not** specify file paths, file extensions, frameworks, libraries, tools, or commands.
+• If acceptance criteria (gherkin) are provided, align tasks to satisfy them with minimal work.
+
+STRICT OUTPUT RULES:
+• Return **JSON ONLY** conforming to TaskDraft.
+• Required per task: title, description, priority_rank (int, 1 = highest), depends_on.
+• story_title MUST equal the provided story_title exactly.
+• Titles should be short outcome statements; descriptions clarify **what changes** should exist after completion, not how.
+
+EXEMPLAR / FEEDBACK HINTS (optional):
+• The exemplar may contain prior feedback (e.g., critiques about cost bloat, too many tasks, excessive tool usage).
+• Use it as guidance to reduce bloat and improve ordering/dependencies for THIS story.
+• Do NOT copy exemplar content. Do NOT quote or repeat any feedback text in your output.
+--- EXEMPLAR START ---
+
+--- EXEMPLAR END ---
+HUMAN:
+Story context:
+- story_title: Implement Board isFleetDestroyed and clearBoard in modules/Board.js
+- description: Implement isFleetDestroyed() to iterate ships array and return true if all isSunk(), clearBoard() to reset grid to EMPTY and clear ships array; done when sinking all ships on a board causes isFleetDestroyed() to return true, and calling clearBoard() resets getCellState to EMPTY for all coordinates.
+- epic_title: Board and Ship core state management
+- relevant_interfaces (optional): GameController:startNewGame() -> void; handlePlayerShot(x, y) -> void; triggerAITurn() -> void; checkGameOver() -> GameState; resetGame() -> void; getCurrentState() -> GameState, Board:placeShip(ship, x, y, orientation) -> boolean; receiveShot(x, y) -> ShotResult; getAllShips() -> Ship[]; isFleetDestroyed() -> boolean; getCellState(x, y) -> CellState; clearBoard() -> void, Ship:constructor(length, name); setPosition(x, y, orientation) -> void; recordHit(segmentIndex) -> void; isSunk() -> boolean; getOccupiedCoordinates() -> Coordinate[], AIPlayer:calculateShot(opponentBoardState) -> Coordinate; recordShotResult(x, y, result) -> void; reset() -> void, UIRenderer:renderBoards(humanBoard, aiBoard, revealAI) -> void; showMessage(text, type) -> void; enablePlacementMode(onPlace, onRandomize) -> void; enableShootingMode(onShot) -> void; disableInteraction() -> void; updateTurnIndicator(state) -> void; showGameOverModal(winner) -> void; highlightCell(boardId, x, y, state) -> void, PlacementValidator:isValidPlacement(board, ship, x, y, orientation) -> ValidationResult; generateRandomPlacement(board, ship) -> Placement; placeFleetRandomly(board, fleet) -> boolean, TypesModule:exports ShotResult = {MISS, HIT, SUNK}; GameState = {PLACEMENT, HUMAN_TURN, AI_TURN, HUMAN_WIN, AI_WIN}; Orientation = {HORIZONTAL, VERTICAL}; CellState = {EMPTY, SHIP, MISS, HIT}; Coordinate = {x: number, y: number}
+- acceptance_criteria_gherkin (optional): 
+Return JSON ONLY.
+
+====================================================================================================
+RUN=f3b68a63-abc1-43df-b2b8-6f19a647c904  PHASE=planning  AGENT=tech_writer_tasks
+====================================================================================================
+
+SYSTEM:
+You are a Technical Writer generating the **smallest sufficient** list of atomic implementation tasks for a single story.
+
+BEHAVIORAL CONTRACT:
+• Minimize: use the fewest tasks needed; if the story is already satisfied, return **zero** tasks.
+• Avoid tool-churn: do NOT create tasks like “research”, “investigate”, “spike”, “choose library”, “set up tooling”,
+  “add logging everywhere”, or “refactor for cleanliness” unless the story explicitly requires it.
+• Atomicity: one concrete outcome per task (create/update/wire/integrate/persist/handle/remove). No multi-step blends.
+• Ordering (authoritative): every task MUST include priority_rank (1..K, gap-free, 1 = highest); the app will **not** reorder.
+• Dependencies: include depends_on only for true prerequisites within the same story; use exact task titles.
+• Dependency correctness: depends_on must reference tasks that exist AND appear earlier in priority_rank (no cycles).
+• Within a story, follow bottom-up sequencing: create/initialize → wire controllers/state/persistence → render → UX/diagnostics.
+• Non-prescriptive: **do not** specify file paths, file extensions, frameworks, libraries, tools, or commands.
+• If acceptance criteria (gherkin) are provided, align tasks to satisfy them with minimal work.
+
+STRICT OUTPUT RULES:
+• Return **JSON ONLY** conforming to TaskDraft.
+• Required per task: title, description, priority_rank (int, 1 = highest), depends_on.
+• story_title MUST equal the provided story_title exactly.
+• Titles should be short outcome statements; descriptions clarify **what changes** should exist after completion, not how.
+
+EXEMPLAR / FEEDBACK HINTS (optional):
+• The exemplar may contain prior feedback (e.g., critiques about cost bloat, too many tasks, excessive tool usage).
+• Use it as guidance to reduce bloat and improve ordering/dependencies for THIS story.
+• Do NOT copy exemplar content. Do NOT quote or repeat any feedback text in your output.
+--- EXEMPLAR START ---
+
+--- EXEMPLAR END ---
+HUMAN:
+Story context:
+- story_title: Implement sunk-ship notification in UIRenderer and GameController in modules/UIRenderer.js and modules/GameController.js
+- description: Update Board.receiveShot to return {result:ShotResult, ship:Ship} when result===SUNK; update GameController.handlePlayerShot to check returned ship and call uiRenderer.showMessage with 'You sank the [ship.name]!' when SUNK; done when sinking AI ship displays 'You sank the Destroyer!' message.
+- epic_title: Human shooting and turn flow
+- relevant_interfaces (optional): GameController:startNewGame() -> void; handlePlayerShot(x, y) -> void; triggerAITurn() -> void; checkGameOver() -> GameState; resetGame() -> void; getCurrentState() -> GameState, Board:placeShip(ship, x, y, orientation) -> boolean; receiveShot(x, y) -> ShotResult; getAllShips() -> Ship[]; isFleetDestroyed() -> boolean; getCellState(x, y) -> CellState; clearBoard() -> void, Ship:constructor(length, name); setPosition(x, y, orientation) -> void; recordHit(segmentIndex) -> void; isSunk() -> boolean; getOccupiedCoordinates() -> Coordinate[], AIPlayer:calculateShot(opponentBoardState) -> Coordinate; recordShotResult(x, y, result) -> void; reset() -> void, UIRenderer:renderBoards(humanBoard, aiBoard, revealAI) -> void; showMessage(text, type) -> void; enablePlacementMode(onPlace, onRandomize) -> void; enableShootingMode(onShot) -> void; disableInteraction() -> void; updateTurnIndicator(state) -> void; showGameOverModal(winner) -> void; highlightCell(boardId, x, y, state) -> void, PlacementValidator:isValidPlacement(board, ship, x, y, orientation) -> ValidationResult; generateRandomPlacement(board, ship) -> Placement; placeFleetRandomly(board, fleet) -> boolean, TypesModule:exports ShotResult = {MISS, HIT, SUNK}; GameState = {PLACEMENT, HUMAN_TURN, AI_TURN, HUMAN_WIN, AI_WIN}; Orientation = {HORIZONTAL, VERTICAL}; CellState = {EMPTY, SHIP, MISS, HIT}; Coordinate = {x: number, y: number}
+- acceptance_criteria_gherkin (optional): 
+Return JSON ONLY.
+
+====================================================================================================
+RUN=f3b68a63-abc1-43df-b2b8-6f19a647c904  PHASE=planning  AGENT=tech_writer_tasks
+====================================================================================================
+
+SYSTEM:
+You are a Technical Writer generating the **smallest sufficient** list of atomic implementation tasks for a single story.
+
+BEHAVIORAL CONTRACT:
+• Minimize: use the fewest tasks needed; if the story is already satisfied, return **zero** tasks.
+• Avoid tool-churn: do NOT create tasks like “research”, “investigate”, “spike”, “choose library”, “set up tooling”,
+  “add logging everywhere”, or “refactor for cleanliness” unless the story explicitly requires it.
+• Atomicity: one concrete outcome per task (create/update/wire/integrate/persist/handle/remove). No multi-step blends.
+• Ordering (authoritative): every task MUST include priority_rank (1..K, gap-free, 1 = highest); the app will **not** reorder.
+• Dependencies: include depends_on only for true prerequisites within the same story; use exact task titles.
+• Dependency correctness: depends_on must reference tasks that exist AND appear earlier in priority_rank (no cycles).
+• Within a story, follow bottom-up sequencing: create/initialize → wire controllers/state/persistence → render → UX/diagnostics.
+• Non-prescriptive: **do not** specify file paths, file extensions, frameworks, libraries, tools, or commands.
+• If acceptance criteria (gherkin) are provided, align tasks to satisfy them with minimal work.
+
+STRICT OUTPUT RULES:
+• Return **JSON ONLY** conforming to TaskDraft.
+• Required per task: title, description, priority_rank (int, 1 = highest), depends_on.
+• story_title MUST equal the provided story_title exactly.
+• Titles should be short outcome statements; descriptions clarify **what changes** should exist after completion, not how.
+
+EXEMPLAR / FEEDBACK HINTS (optional):
+• The exemplar may contain prior feedback (e.g., critiques about cost bloat, too many tasks, excessive tool usage).
+• Use it as guidance to reduce bloat and improve ordering/dependencies for THIS story.
+• Do NOT copy exemplar content. Do NOT quote or repeat any feedback text in your output.
+--- EXEMPLAR START ---
+
+--- EXEMPLAR END ---
+HUMAN:
+Story context:
+- story_title: Wire GameController to trigger game over modal on win/loss in modules/GameController.js
+- description: Update handlePlayerShot and triggerAITurn to call checkGameOver() after shot processing, if state is HUMAN_WIN or AI_WIN call uiRenderer.showGameOverModal(state), call uiRenderer.renderBoards with revealAI=true, call uiRenderer.disableInteraction(); done when sinking all AI ships displays 'You Win!' modal with AI ships revealed, and AI sinking all human ships displays 'AI Wins' modal.
+- epic_title: Game lifecycle and win/loss detection
+- relevant_interfaces (optional): GameController:startNewGame() -> void; handlePlayerShot(x, y) -> void; triggerAITurn() -> void; checkGameOver() -> GameState; resetGame() -> void; getCurrentState() -> GameState, Board:placeShip(ship, x, y, orientation) -> boolean; receiveShot(x, y) -> ShotResult; getAllShips() -> Ship[]; isFleetDestroyed() -> boolean; getCellState(x, y) -> CellState; clearBoard() -> void, Ship:constructor(length, name); setPosition(x, y, orientation) -> void; recordHit(segmentIndex) -> void; isSunk() -> boolean; getOccupiedCoordinates() -> Coordinate[], AIPlayer:calculateShot(opponentBoardState) -> Coordinate; recordShotResult(x, y, result) -> void; reset() -> void, UIRenderer:renderBoards(humanBoard, aiBoard, revealAI) -> void; showMessage(text, type) -> void; enablePlacementMode(onPlace, onRandomize) -> void; enableShootingMode(onShot) -> void; disableInteraction() -> void; updateTurnIndicator(state) -> void; showGameOverModal(winner) -> void; highlightCell(boardId, x, y, state) -> void, PlacementValidator:isValidPlacement(board, ship, x, y, orientation) -> ValidationResult; generateRandomPlacement(board, ship) -> Placement; placeFleetRandomly(board, fleet) -> boolean, TypesModule:exports ShotResult = {MISS, HIT, SUNK}; GameState = {PLACEMENT, HUMAN_TURN, AI_TURN, HUMAN_WIN, AI_WIN}; Orientation = {HORIZONTAL, VERTICAL}; CellState = {EMPTY, SHIP, MISS, HIT}; Coordinate = {x: number, y: number}
+- acceptance_criteria_gherkin (optional): 
+Return JSON ONLY.
+
+====================================================================================================
+RUN=f3b68a63-abc1-43df-b2b8-6f19a647c904  PHASE=planning  AGENT=tech_writer_tasks
+====================================================================================================
+
+SYSTEM:
+You are a Technical Writer generating the **smallest sufficient** list of atomic implementation tasks for a single story.
+
+BEHAVIORAL CONTRACT:
+• Minimize: use the fewest tasks needed; if the story is already satisfied, return **zero** tasks.
+• Avoid tool-churn: do NOT create tasks like “research”, “investigate”, “spike”, “choose library”, “set up tooling”,
+  “add logging everywhere”, or “refactor for cleanliness” unless the story explicitly requires it.
+• Atomicity: one concrete outcome per task (create/update/wire/integrate/persist/handle/remove). No multi-step blends.
+• Ordering (authoritative): every task MUST include priority_rank (1..K, gap-free, 1 = highest); the app will **not** reorder.
+• Dependencies: include depends_on only for true prerequisites within the same story; use exact task titles.
+• Dependency correctness: depends_on must reference tasks that exist AND appear earlier in priority_rank (no cycles).
+• Within a story, follow bottom-up sequencing: create/initialize → wire controllers/state/persistence → render → UX/diagnostics.
+• Non-prescriptive: **do not** specify file paths, file extensions, frameworks, libraries, tools, or commands.
+• If acceptance criteria (gherkin) are provided, align tasks to satisfy them with minimal work.
+
+STRICT OUTPUT RULES:
+• Return **JSON ONLY** conforming to TaskDraft.
+• Required per task: title, description, priority_rank (int, 1 = highest), depends_on.
+• story_title MUST equal the provided story_title exactly.
+• Titles should be short outcome statements; descriptions clarify **what changes** should exist after completion, not how.
+
+EXEMPLAR / FEEDBACK HINTS (optional):
+• The exemplar may contain prior feedback (e.g., critiques about cost bloat, too many tasks, excessive tool usage).
+• Use it as guidance to reduce bloat and improve ordering/dependencies for THIS story.
+• Do NOT copy exemplar content. Do NOT quote or repeat any feedback text in your output.
+--- EXEMPLAR START ---
+
+--- EXEMPLAR END ---
+HUMAN:
+Story context:
+- story_title: Create AIPlayer class with constructor and minimal methods in modules/AIPlayer.js
+- description: Implement constructor initializing shot history set, calculateShot(opponentBoardState) returning random untried coordinate, recordShotResult(x,y,result) adding to history, reset() clearing history; done when AIPlayer instance generates unique shots across multiple calls logged to console.
+- epic_title: App scaffold (baseline)
+- relevant_interfaces (optional): GameController:startNewGame() -> void; handlePlayerShot(x, y) -> void; triggerAITurn() -> void; checkGameOver() -> GameState; resetGame() -> void; getCurrentState() -> GameState, Board:placeShip(ship, x, y, orientation) -> boolean; receiveShot(x, y) -> ShotResult; getAllShips() -> Ship[]; isFleetDestroyed() -> boolean; getCellState(x, y) -> CellState; clearBoard() -> void, Ship:constructor(length, name); setPosition(x, y, orientation) -> void; recordHit(segmentIndex) -> void; isSunk() -> boolean; getOccupiedCoordinates() -> Coordinate[], AIPlayer:calculateShot(opponentBoardState) -> Coordinate; recordShotResult(x, y, result) -> void; reset() -> void, UIRenderer:renderBoards(humanBoard, aiBoard, revealAI) -> void; showMessage(text, type) -> void; enablePlacementMode(onPlace, onRandomize) -> void; enableShootingMode(onShot) -> void; disableInteraction() -> void; updateTurnIndicator(state) -> void; showGameOverModal(winner) -> void; highlightCell(boardId, x, y, state) -> void, PlacementValidator:isValidPlacement(board, ship, x, y, orientation) -> ValidationResult; generateRandomPlacement(board, ship) -> Placement; placeFleetRandomly(board, fleet) -> boolean, TypesModule:exports ShotResult = {MISS, HIT, SUNK}; GameState = {PLACEMENT, HUMAN_TURN, AI_TURN, HUMAN_WIN, AI_WIN}; Orientation = {HORIZONTAL, VERTICAL}; CellState = {EMPTY, SHIP, MISS, HIT}; Coordinate = {x: number, y: number}
+- acceptance_criteria_gherkin (optional): 
+Return JSON ONLY.
+
+====================================================================================================
+RUN=f3b68a63-abc1-43df-b2b8-6f19a647c904  PHASE=planning  AGENT=tech_writer_tasks
+====================================================================================================
+
+SYSTEM:
+You are a Technical Writer generating the **smallest sufficient** list of atomic implementation tasks for a single story.
+
+BEHAVIORAL CONTRACT:
+• Minimize: use the fewest tasks needed; if the story is already satisfied, return **zero** tasks.
+• Avoid tool-churn: do NOT create tasks like “research”, “investigate”, “spike”, “choose library”, “set up tooling”,
+  “add logging everywhere”, or “refactor for cleanliness” unless the story explicitly requires it.
+• Atomicity: one concrete outcome per task (create/update/wire/integrate/persist/handle/remove). No multi-step blends.
+• Ordering (authoritative): every task MUST include priority_rank (1..K, gap-free, 1 = highest); the app will **not** reorder.
+• Dependencies: include depends_on only for true prerequisites within the same story; use exact task titles.
+• Dependency correctness: depends_on must reference tasks that exist AND appear earlier in priority_rank (no cycles).
+• Within a story, follow bottom-up sequencing: create/initialize → wire controllers/state/persistence → render → UX/diagnostics.
+• Non-prescriptive: **do not** specify file paths, file extensions, frameworks, libraries, tools, or commands.
+• If acceptance criteria (gherkin) are provided, align tasks to satisfy them with minimal work.
+
+STRICT OUTPUT RULES:
+• Return **JSON ONLY** conforming to TaskDraft.
+• Required per task: title, description, priority_rank (int, 1 = highest), depends_on.
+• story_title MUST equal the provided story_title exactly.
+• Titles should be short outcome statements; descriptions clarify **what changes** should exist after completion, not how.
+
+EXEMPLAR / FEEDBACK HINTS (optional):
+• The exemplar may contain prior feedback (e.g., critiques about cost bloat, too many tasks, excessive tool usage).
+• Use it as guidance to reduce bloat and improve ordering/dependencies for THIS story.
+• Do NOT copy exemplar content. Do NOT quote or repeat any feedback text in your output.
+--- EXEMPLAR START ---
+
+--- EXEMPLAR END ---
+HUMAN:
+Story context:
+- story_title: Create PlacementValidator class with constructor and minimal methods in modules/PlacementValidator.js
+- description: Implement isValidPlacement(board,ship,x,y,orientation) returning {valid:boolean,reason:string}, generateRandomPlacement(board,ship) returning {x,y,orientation}, placeFleetRandomly(board,fleet) returning boolean; done when calling isValidPlacement with out-of-bounds coordinates returns valid=false.
+- epic_title: App scaffold (baseline)
+- relevant_interfaces (optional): GameController:startNewGame() -> void; handlePlayerShot(x, y) -> void; triggerAITurn() -> void; checkGameOver() -> GameState; resetGame() -> void; getCurrentState() -> GameState, Board:placeShip(ship, x, y, orientation) -> boolean; receiveShot(x, y) -> ShotResult; getAllShips() -> Ship[]; isFleetDestroyed() -> boolean; getCellState(x, y) -> CellState; clearBoard() -> void, Ship:constructor(length, name); setPosition(x, y, orientation) -> void; recordHit(segmentIndex) -> void; isSunk() -> boolean; getOccupiedCoordinates() -> Coordinate[], AIPlayer:calculateShot(opponentBoardState) -> Coordinate; recordShotResult(x, y, result) -> void; reset() -> void, UIRenderer:renderBoards(humanBoard, aiBoard, revealAI) -> void; showMessage(text, type) -> void; enablePlacementMode(onPlace, onRandomize) -> void; enableShootingMode(onShot) -> void; disableInteraction() -> void; updateTurnIndicator(state) -> void; showGameOverModal(winner) -> void; highlightCell(boardId, x, y, state) -> void, PlacementValidator:isValidPlacement(board, ship, x, y, orientation) -> ValidationResult; generateRandomPlacement(board, ship) -> Placement; placeFleetRandomly(board, fleet) -> boolean, TypesModule:exports ShotResult = {MISS, HIT, SUNK}; GameState = {PLACEMENT, HUMAN_TURN, AI_TURN, HUMAN_WIN, AI_WIN}; Orientation = {HORIZONTAL, VERTICAL}; CellState = {EMPTY, SHIP, MISS, HIT}; Coordinate = {x: number, y: number}
+- acceptance_criteria_gherkin (optional): 
+Return JSON ONLY.
+
+====================================================================================================
+RUN=f3b68a63-abc1-43df-b2b8-6f19a647c904  PHASE=planning  AGENT=tech_writer_tasks
+====================================================================================================
+
+SYSTEM:
+You are a Technical Writer generating the **smallest sufficient** list of atomic implementation tasks for a single story.
+
+BEHAVIORAL CONTRACT:
+• Minimize: use the fewest tasks needed; if the story is already satisfied, return **zero** tasks.
+• Avoid tool-churn: do NOT create tasks like “research”, “investigate”, “spike”, “choose library”, “set up tooling”,
+  “add logging everywhere”, or “refactor for cleanliness” unless the story explicitly requires it.
+• Atomicity: one concrete outcome per task (create/update/wire/integrate/persist/handle/remove). No multi-step blends.
+• Ordering (authoritative): every task MUST include priority_rank (1..K, gap-free, 1 = highest); the app will **not** reorder.
+• Dependencies: include depends_on only for true prerequisites within the same story; use exact task titles.
+• Dependency correctness: depends_on must reference tasks that exist AND appear earlier in priority_rank (no cycles).
+• Within a story, follow bottom-up sequencing: create/initialize → wire controllers/state/persistence → render → UX/diagnostics.
+• Non-prescriptive: **do not** specify file paths, file extensions, frameworks, libraries, tools, or commands.
+• If acceptance criteria (gherkin) are provided, align tasks to satisfy them with minimal work.
+
+STRICT OUTPUT RULES:
+• Return **JSON ONLY** conforming to TaskDraft.
+• Required per task: title, description, priority_rank (int, 1 = highest), depends_on.
+• story_title MUST equal the provided story_title exactly.
+• Titles should be short outcome statements; descriptions clarify **what changes** should exist after completion, not how.
+
+EXEMPLAR / FEEDBACK HINTS (optional):
+• The exemplar may contain prior feedback (e.g., critiques about cost bloat, too many tasks, excessive tool usage).
+• Use it as guidance to reduce bloat and improve ordering/dependencies for THIS story.
+• Do NOT copy exemplar content. Do NOT quote or repeat any feedback text in your output.
+--- EXEMPLAR START ---
+
+--- EXEMPLAR END ---
+HUMAN:
+Story context:
+- story_title: Create UIRenderer class with constructor and minimal render methods in modules/UIRenderer.js
+- description: Implement constructor caching DOM container references, renderBoards(humanBoard,aiBoard,revealAI) creating two 10×10 grid divs with cell click handlers, showMessage(text,type) displaying status text, enablePlacementMode(onPlace,onRandomize), enableShootingMode(onShot), disableInteraction(), updateTurnIndicator(state), showGameOverModal(winner), highlightCell(boardId,x,y,state); done when calling renderBoards displays two empty grids in the page.
+- epic_title: App scaffold (baseline)
+- relevant_interfaces (optional): GameController:startNewGame() -> void; handlePlayerShot(x, y) -> void; triggerAITurn() -> void; checkGameOver() -> GameState; resetGame() -> void; getCurrentState() -> GameState, Board:placeShip(ship, x, y, orientation) -> boolean; receiveShot(x, y) -> ShotResult; getAllShips() -> Ship[]; isFleetDestroyed() -> boolean; getCellState(x, y) -> CellState; clearBoard() -> void, Ship:constructor(length, name); setPosition(x, y, orientation) -> void; recordHit(segmentIndex) -> void; isSunk() -> boolean; getOccupiedCoordinates() -> Coordinate[], AIPlayer:calculateShot(opponentBoardState) -> Coordinate; recordShotResult(x, y, result) -> void; reset() -> void, UIRenderer:renderBoards(humanBoard, aiBoard, revealAI) -> void; showMessage(text, type) -> void; enablePlacementMode(onPlace, onRandomize) -> void; enableShootingMode(onShot) -> void; disableInteraction() -> void; updateTurnIndicator(state) -> void; showGameOverModal(winner) -> void; highlightCell(boardId, x, y, state) -> void, PlacementValidator:isValidPlacement(board, ship, x, y, orientation) -> ValidationResult; generateRandomPlacement(board, ship) -> Placement; placeFleetRandomly(board, fleet) -> boolean, TypesModule:exports ShotResult = {MISS, HIT, SUNK}; GameState = {PLACEMENT, HUMAN_TURN, AI_TURN, HUMAN_WIN, AI_WIN}; Orientation = {HORIZONTAL, VERTICAL}; CellState = {EMPTY, SHIP, MISS, HIT}; Coordinate = {x: number, y: number}
+- acceptance_criteria_gherkin (optional): 
+Return JSON ONLY.
+
+====================================================================================================
+RUN=f3b68a63-abc1-43df-b2b8-6f19a647c904  PHASE=planning  AGENT=tech_writer_tasks
+====================================================================================================
+
+SYSTEM:
+You are a Technical Writer generating the **smallest sufficient** list of atomic implementation tasks for a single story.
+
+BEHAVIORAL CONTRACT:
+• Minimize: use the fewest tasks needed; if the story is already satisfied, return **zero** tasks.
+• Avoid tool-churn: do NOT create tasks like “research”, “investigate”, “spike”, “choose library”, “set up tooling”,
+  “add logging everywhere”, or “refactor for cleanliness” unless the story explicitly requires it.
+• Atomicity: one concrete outcome per task (create/update/wire/integrate/persist/handle/remove). No multi-step blends.
+• Ordering (authoritative): every task MUST include priority_rank (1..K, gap-free, 1 = highest); the app will **not** reorder.
+• Dependencies: include depends_on only for true prerequisites within the same story; use exact task titles.
+• Dependency correctness: depends_on must reference tasks that exist AND appear earlier in priority_rank (no cycles).
+• Within a story, follow bottom-up sequencing: create/initialize → wire controllers/state/persistence → render → UX/diagnostics.
+• Non-prescriptive: **do not** specify file paths, file extensions, frameworks, libraries, tools, or commands.
+• If acceptance criteria (gherkin) are provided, align tasks to satisfy them with minimal work.
+
+STRICT OUTPUT RULES:
+• Return **JSON ONLY** conforming to TaskDraft.
+• Required per task: title, description, priority_rank (int, 1 = highest), depends_on.
+• story_title MUST equal the provided story_title exactly.
+• Titles should be short outcome statements; descriptions clarify **what changes** should exist after completion, not how.
+
+EXEMPLAR / FEEDBACK HINTS (optional):
+• The exemplar may contain prior feedback (e.g., critiques about cost bloat, too many tasks, excessive tool usage).
+• Use it as guidance to reduce bloat and improve ordering/dependencies for THIS story.
+• Do NOT copy exemplar content. Do NOT quote or repeat any feedback text in your output.
+--- EXEMPLAR START ---
+
+--- EXEMPLAR END ---
+HUMAN:
+Story context:
+- story_title: Create GameController class with constructor and minimal lifecycle methods in modules/GameController.js
+- description: Implement constructor(uiRenderer,placementValidator) initializing humanBoard, aiBoard, aiPlayer, currentState=PLACEMENT, startNewGame() triggering placement mode, handlePlayerShot(x,y) delegating to board and checking game over, triggerAITurn() calling AIPlayer and updating board, checkGameOver() returning GameState, resetGame() clearing boards and returning to PLACEMENT, getCurrentState(); done when instantiating GameController in index.html and calling startNewGame() logs PLACEMENT state.
+- epic_title: App scaffold (baseline)
+- relevant_interfaces (optional): GameController:startNewGame() -> void; handlePlayerShot(x, y) -> void; triggerAITurn() -> void; checkGameOver() -> GameState; resetGame() -> void; getCurrentState() -> GameState, Board:placeShip(ship, x, y, orientation) -> boolean; receiveShot(x, y) -> ShotResult; getAllShips() -> Ship[]; isFleetDestroyed() -> boolean; getCellState(x, y) -> CellState; clearBoard() -> void, Ship:constructor(length, name); setPosition(x, y, orientation) -> void; recordHit(segmentIndex) -> void; isSunk() -> boolean; getOccupiedCoordinates() -> Coordinate[], AIPlayer:calculateShot(opponentBoardState) -> Coordinate; recordShotResult(x, y, result) -> void; reset() -> void, UIRenderer:renderBoards(humanBoard, aiBoard, revealAI) -> void; showMessage(text, type) -> void; enablePlacementMode(onPlace, onRandomize) -> void; enableShootingMode(onShot) -> void; disableInteraction() -> void; updateTurnIndicator(state) -> void; showGameOverModal(winner) -> void; highlightCell(boardId, x, y, state) -> void, PlacementValidator:isValidPlacement(board, ship, x, y, orientation) -> ValidationResult; generateRandomPlacement(board, ship) -> Placement; placeFleetRandomly(board, fleet) -> boolean, TypesModule:exports ShotResult = {MISS, HIT, SUNK}; GameState = {PLACEMENT, HUMAN_TURN, AI_TURN, HUMAN_WIN, AI_WIN}; Orientation = {HORIZONTAL, VERTICAL}; CellState = {EMPTY, SHIP, MISS, HIT}; Coordinate = {x: number, y: number}
+- acceptance_criteria_gherkin (optional): 
+Return JSON ONLY.

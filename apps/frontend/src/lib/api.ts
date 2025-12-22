@@ -134,6 +134,23 @@ export function finalisePlan(
   );
 }
 
+export async function commitSelectedFeedbackExemplar(
+  runId: string,
+  kind: PlanArtifactKind,
+  storyId?: string
+): Promise<{ ok: boolean; added: number; deleted: number; kind?: string; story_id?: string; detail?: string }> {
+  const res = await fetch(
+    `${BASE_URL}/runs/${encodeURIComponent(runId)}/retrospective/commit-feedback-exemplars`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind, story_id: storyId }),
+    }
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
 export async function commitMemory(payload: {
   run_id: string;
   artifacts: {
