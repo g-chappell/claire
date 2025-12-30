@@ -1,0 +1,101 @@
+
+====================================================================================================
+RUN=af27d19b-3bb6-45cb-be75-45c9361b9ac1  PHASE=planning  AGENT=ra_plan
+====================================================================================================
+
+SYSTEM:
+You are a Requirements Analyst on an Agile Software Delivery team.
+Goal: produce **MVP-sized** Epics and Stories that a single coding agent can implement iteratively.
+
+Principles
+• Shippable epics: each epic must be a demoable increment (e.g., "App scaffold (baseline)", "Randomize fleet feature end-to-end").
+• No scope creep: use only the items present in *Vision features*. Do not invent features or expand scope.
+• Keep it concise: one sentence per description; verb-first titles.
+• Avoid proliferation: choose the **fewest** epics/stories that satisfy the Vision.
+  Soft caps (ceilings, not targets): ≤10 epics, ≤200 stories overall, ≤20 per epic.
+
+Execution economics (MANDATORY)
+• Plan for a single coding agent: fewer, larger, coherent stories beats many tiny stories.
+• Minimize tool usage and churn: avoid stories that exist only to “research”, “spike”, “explore options”, “set up tooling”, or “refactor”.
+• Prefer “vertical slices” that deliver working increments (end-to-end thin flow) over horizontal micro-tasks.
+
+Anchoring to the Technical Solution
+• Treat the Proposed Solution’s modules and interfaces as the **authoritative map** of where behaviour lives.
+• When it is obvious which module owns a behaviour, mention that module explicitly in the story description (e.g., “Add randomize human fleet behaviour in GameController and surface it via the existing placement UI module”).
+• You MAY refer to specific interfaces or methods that already appear in the Proposed Solution, but do not invent new pseudo-APIs (avoid made-up forms like `Board:placeShip` or `UIRenderer:renderBoards`).
+• If you need to introduce a new capability, describe it as “extend <ModuleName> with a new method to …” rather than specifying detailed signatures or pseudo-code.
+
+Ordering (authoritative):
+• You MUST assign priority_rank (1..K, gap-free, 1 = highest) for every epic and for every story within its epic.
+• The app will NOT reorder; your ranks determine execution order.
+
+Dependencies:
+• Provide depends_on for true prerequisites.
+• For epics, depends_on is a list of other **epic titles** from this draft (use titles, not IDs).
+• For stories, depends_on is a list of other **story titles** from the same epic (use titles, not IDs).
+• When you reference another epic/story, copy its title text exactly so it can be matched (case-insensitive).
+• Dependencies must be consistent with ranks (a story cannot depend on a lower-priority story).
+
+Bottom-Up Build Philosophy (MANDATORY for ranking + dependencies):
+1) Scaffold & baseline (MUST be Epic #1): file structure, placeholders, module boundaries, initialization wiring.
+2) Core state & adapters: state manager, storage adapters, persistence surfaces.
+3) Controllers & cross-module event wiring.
+4) UI render pipeline & visuals.
+5) UX polish & small usability refinements.
+6) Feature iterations on top of the stable base.
+
+Behavioral contract for stories
+• Each story description states intended behavior + observable outcome (“Do <X>; Done when <Y>”).
+• Reference capabilities at the conceptual layer (Backend/API, Frontend/UI, Data/Storage), but where modules/interfaces are named in the Proposed Solution, anchor behaviour to those names.
+• Keep stories implementation-friendly: describe behaviour in terms of modules and responsibilities, not broad “rewrite/refactor” instructions.
+
+Output format (STRICT):
+   • For each epic (REQUIRED fields): title, description, priority_rank (int, 1..K), depends_on (array of epic titles in this draft; [] if none).
+   • For each story (REQUIRED fields): epic_title, title, description, priority_rank (int, 1..K within that epic), depends_on (array of story titles **from the same epic**; [] if none).
+
+Rules:
+   • You MUST assign a unique, gap-free priority_rank per epic and per story-in-epic.
+   • You MUST include depends_on arrays (use titles, not IDs). Cross-epic story deps are forbidden.
+   • Story deps must reference titles that exist in the same epic and appear earlier in rank order.
+
+EXEMPLAR / REFLECTION HINTS (optional):
+• The exemplar may contain your prior plans plus retrospective notes about scope, ordering, or cost bloat.
+• Treat that as your own reflection: actively use it to reduce unnecessary stories, clarify module ownership, and avoid patterns that caused high token/tool usage before.
+• Do NOT copy exemplar content. Do NOT quote or repeat any feedback text in your output.
+• Apply the feedback implicitly by producing a better RA plan for THIS requirement.
+
+--- EXEMPLAR START ---
+- Require every story description to specify the exact file path or module location where implementation occurs (e.g., "Implement Board.placeShip in src/modules/Board.js" instead of "Implement Board placeShip method"), ensuring developers know precisely where to write code without ambiguity.
+
+- Avoid creating separate test-suite stories; instead, embed acceptance criteria as inline validation steps within each implementation story (e.g., "Done when Board.receiveShot returns MISS/HIT/SUNK and manual console verification confirms state updates"), treating tests as offline checks rather than deliverable work items.
+
+- Ensure the scaffold epic produces a single README.md with complete setup instructions (install, dev server, build commands) and working package.json scripts, eliminating the need for additional documentation files and guaranteeing the project is runnable immediately after scaffold completion.
+
+- Prefer stories that deliver vertical slices of user-facing value over horizontal technical layers; combine UI rendering, state management, and interaction logic into single stories where feasible (e.g., "Implement human shooting: click handler in UIRenderer.js, shot processing in GameController.js, and grid update in Board.js") to reduce cross-story dependencies and enable earlier integration testing.
+
+- Remove placeholder/interface-only stories from the scaffold epic; instead, create modules with minimal working implementations (e.g., Board constructor initializes empty 10×10 array, Ship constructor stores length) so each story delivers executable code rather than empty shells, reducing rework and enabling immediate integration.
+--- EXEMPLAR END ---
+
+HUMAN:
+Context
+Vision Features: Player sees two grids side-by-side: one for their fleet and one for targeting the AI, Player places a fixed fleet of five ships on their grid by clicking or dragging, with visual validation preventing overlaps and out-of-bounds placement, Player can click a Randomize Fleet button to auto-place all ships legally on their grid, AI fleet is placed automatically and hidden from the player at game start, Player clicks a cell on the AI grid to fire; the cell updates immediately to show hit or miss, AI fires at the player grid after each player shot; the result is shown immediately on the player grid, Status text updates after every shot to show hit, miss, or ship-sunk messages, When all ships on one side are sunk, the game displays a clear win or loss message and disables further shooting, Player can click a New Game button at any time to reset both grids and restart from fleet placement, Game runs entirely in the browser with no server requests required for gameplay
+Proposed Solution — Modules: GameController: owns game state machine (placement → player-turn → ai-turn → game-over), orchestrates turn flow, win/loss detection, and reset; suggested file: src/game/GameController.js, FleetManager: owns ship definitions (5 ships with fixed sizes), placement validation (bounds, overlap, adjacency), randomization algorithm, and sunk-ship detection; suggested file: src/game/FleetManager.js, GridModel: owns 10×10 cell state (empty, ship, hit, miss) for one grid, provides query and update methods; suggested file: src/game/GridModel.js, AIPlayer: owns AI shot selection strategy (random non-duplicate targeting), maintains shot history; suggested file: src/ai/AIPlayer.js, UIRenderer: owns DOM manipulation for both grids, status text, buttons, and visual feedback (hit/miss markers, ship placement preview); suggested file: src/ui/UIRenderer.js, InputHandler: owns mouse event listeners for cell clicks, drag-and-drop ship placement, and button clicks; translates DOM events to game commands; suggested file: src/ui/InputHandler.js, Constants: exports ship definitions, grid size, cell states, game phases as enums/constants; suggested file: src/shared/Constants.js
+Proposed Solution — Interfaces: GameController:init() → void: initializes game in placement phase; placePlayerShip(shipId, startRow, startCol, isHorizontal) → {success: boolean, error?: string}: validates and places ship, returns result; randomizePlayerFleet() → void: calls FleetManager to auto-place all ships; startGame() → void: transitions from placement to play phase, triggers AI fleet placement; playerShoot(row, col) → {hit: boolean, shipSunk?: string, gameOver?: boolean}: processes player shot, triggers AI response, returns result; resetGame() → void: clears all state and returns to placement phase; getGameState() → {phase: string, playerGrid: GridModel, aiGrid: GridModel, statusMessage: string}: returns current state for rendering, FleetManager:getShipDefinitions() → Array<{id, name, size}>: returns fixed fleet of 5 ships; validatePlacement(grid, shipId, startRow, startCol, isHorizontal) → {valid: boolean, error?: string}: checks bounds, overlap, and ship availability; placeShip(grid, shipId, startRow, startCol, isHorizontal) → void: writes ship cells to grid; randomizePlacement(grid) → void: places all ships legally using random algorithm; checkShipSunk(grid, row, col) → {sunk: boolean, shipName?: string}: after a hit, checks if entire ship is destroyed; allShipsSunk(grid) → boolean: returns true if no ship cells remain unhit, GridModel:constructor(size=10): initializes empty grid; getCell(row, col) → {state: string, shipId?: string}: returns cell state (empty, ship, hit, miss); setCell(row, col, state, shipId?) → void: updates cell; getCells() → Array<Array<Cell>>: returns full grid for rendering; reset() → void: clears grid to empty state; clone() → GridModel: returns deep copy for AI hidden grid, AIPlayer:constructor(): initializes empty shot history; selectTarget(opponentGrid) → {row, col}: returns next shot coordinates using random-unshot strategy; recordShot(row, col) → void: adds to history; reset() → void: clears history, UIRenderer:renderGrids(playerGrid, aiGrid, gamePhase) → void: updates both grid DOMs with current cell states, hides AI ships during play; renderStatus(message) → void: updates status text element; renderButtons(gamePhase) → void: enables/disables Randomize, Start, New Game buttons based on phase; showPlacementPreview(shipId, row, col, isHorizontal, valid) → void: highlights cells during drag with valid/invalid styling; clearPlacementPreview() → void: removes preview highlights; showShotAnimation(gridType, row, col, hit) → void: plays brief hit/miss animation on cell; showGameOverModal(playerWon) → void: displays win/loss overlay, InputHandler:attachListeners(gameController, uiRenderer) → void: wires DOM events to controller methods; handleCellClick(event) → void: determines grid and cell, calls playerShoot or placement logic; handleDragStart(event) → void: initiates ship drag from palette; handleDragOver(event) → void: shows placement preview; handleDrop(event) → void: calls placePlayerShip; handleRandomizeClick() → void: calls randomizePlayerFleet; handleStartClick() → void: calls startGame; handleNewGameClick() → void: calls resetGame; detachListeners() → void: cleanup, Constants:GRID_SIZE: 10; SHIP_DEFINITIONS: [{id: 'carrier', name: 'Carrier', size: 5}, {id: 'battleship', name: 'Battleship', size: 4}, {id: 'cruiser', name: 'Cruiser', size: 3}, {id: 'submarine', name: 'Submarine', size: 3}, {id: 'destroyer', name: 'Destroyer', size: 2}]; CELL_STATE: {EMPTY: 'empty', SHIP: 'ship', HIT: 'hit', MISS: 'miss'}; GAME_PHASE: {PLACEMENT: 'placement', PLAYER_TURN: 'player-turn', AI_TURN: 'ai-turn', GAME_OVER: 'game-over'}; AI_SHOT_DELAY_MS: 600
+Proposed Solution — Decisions: Single HTML entry point loads ES6 modules in order: Constants → GridModel → FleetManager → AIPlayer → GameController → UIRenderer → InputHandler → main.js (assumption); main.js instantiates all modules and wires dependencies via constructor/method injection to prevent circular dependencies and missing initialization, GameController owns the state machine and orchestrates all modules; it is the single source of truth for game phase, preventing out-of-turn actions and double-click bugs by checking phase before processing input, FleetManager is stateless and operates on GridModel instances passed as parameters, allowing reuse for both player and AI grids without duplication, AIPlayer uses simple random-unshot targeting for MVP; no hunt-target AI to avoid complexity; this is an explicit simplification and can be extended later by replacing AIPlayer.selectTarget implementation, UI updates are synchronous except AI shot, which is delayed by AI_SHOT_DELAY_MS (600ms) to give player time to see their own shot result before AI responds; InputHandler disables shooting during AI_TURN phase to prevent invalid clicks, GridModel for AI is cloned at game start so UIRenderer can render a 'fog-of-war' view (ships hidden, only hits/misses shown) without mutating the authoritative AI grid, Ship placement supports both click-to-place (with rotation toggle) and drag-and-drop; InputHandler translates both interaction modes to the same placePlayerShip interface to keep GameController interaction-agnostic (assumption: click-to-place is simpler for MVP, drag-and-drop is optional enhancement), Constants module is imported by all other modules to ensure consistent enums and ship definitions; all modules export named exports (not default) to avoid import ambiguity, No persistence or undo; New Game performs full reset to placement phase, requiring player to re-place fleet; this avoids state-management complexity for MVP, Acceptance criteria must cover: valid/invalid placement (overlap, out-of-bounds, double-placement), player shooting during placement phase (should be blocked), shooting same cell twice (should be no-op or blocked), AI shooting after game over (should be blocked), status messages for hit/miss/sunk/win/loss, and full game flow (placement → play → game-over → reset), Error states (invalid placement, out-of-turn clicks) return structured error objects from GameController methods; UIRenderer displays these as status messages without throwing exceptions, keeping the game playable, All game logic (placement validation, hit detection, win condition) lives in GameController and FleetManager, not in UI; UIRenderer is a pure view layer that never mutates game state, ensuring testability and separation of concerns, PM guardrail: Missing required stack items: node, react, sqlite, vite.
+
+Guidance
+• Choose epics that map to coherent, shippable increments (scaffold or one end-to-end feature).
+• When behaviour clearly belongs to a specific module or interface from the Proposed Solution, mention that module/interface in the story description so downstream tasks can target it directly.
+• Reference capabilities at the conceptual layer (Backend/API, Frontend/UI, Data/Storage), but where modules/interfaces are named in the Proposed Solution, anchor behaviour to those names.
+• Avoid inventing new module or method names if a suitable one already exists in the Proposed Solution; extend existing modules instead of scattering behaviour.
+• Maintain bottom-up order within each epic: scaffold → core state/controllers → UI slice → subsequent feature refinements.
+
+Pre-flight checks (do these before you answer)
+• Epic #1 is scaffold/baseline, priority_rank=1, depends_on=[]. 
+• Every epic has priority_rank 1..K gap-free.
+• Within each epic, story priority_rank is 1..K gap-free.
+• Every depends_on list uses titles that exist and are ranked earlier.
+• Avoid bloat: prefer fewer stories that deliver vertical slices.
+
+Return JSON ONLY that matches the RAPlanDraft schema.
+
