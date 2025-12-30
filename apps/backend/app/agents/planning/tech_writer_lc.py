@@ -15,7 +15,8 @@ def make_notes_chain(llm):
     """
     Emits ONLY design notes (no tasks). Output is parsed as TechWritingBundleDraft but we only use .notes.
     """
-    prompt = ChatPromptTemplate.from_messages([
+    prompt = ChatPromptTemplate.from_messages(
+        [
             (
                 "system",
                 """
@@ -91,7 +92,8 @@ def make_tasks_chain(llm):
     Emits a minimal, atomic TaskDraft list for a single story.
     Optimized for Serena: specific outcomes, zero tool/path prescriptions, align with repo conventions at execution time.
     """
-    prompt = ChatPromptTemplate.from_messages([
+    prompt = ChatPromptTemplate.from_messages(
+        [
             (
                 "system",
                 """
@@ -151,7 +153,7 @@ Story context:
 Return JSON ONLY.
                 """,
             ),
-    ]).partial(exemplar="", gherkin="")
+        ]).partial(exemplar="", gherkin="")
     use_function_calling = False
     if ChatOpenAI is not None:
         try:

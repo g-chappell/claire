@@ -80,7 +80,7 @@ _PROMPT = ChatPromptTemplate.from_messages(
 )
  
 def make_chain(llm: Any, **knobs: Any) -> Runnable:
-    defaults: Dict[str, Any] = {"max_goals": 3, "max_personas": 2, "max_features": 5}
+    defaults: Dict[str, Any] = {"max_goals": 5, "max_personas": 5, "max_features": 10}
     if knobs:
         defaults.update(knobs)
     # ensure placeholders exist even if not passed
