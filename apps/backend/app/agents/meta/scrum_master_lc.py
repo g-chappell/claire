@@ -34,7 +34,11 @@ Generalization requirement (critical):
 - Stay domain-aware but write guidance as general planning/architecture/task-quality rules.
 
 Hard rules:
-- Output ONLY 1–5 bullet points. No headings. No paragraphs.
+- Output ONLY headings and bullet points (no paragraphs).
+- Every bullet must be directly grounded in the provided artefact context and/or the human feedback.
+- Do NOT introduce new categories of advice not prompted by the artefact/human feedback.
+- Prefer fewer, higher-impact bullets: merge related points, remove duplicates, stop once key issues are covered.
+- Avoid task-list rewrites and “how to implement” detail; keep to planning-quality constraints.
 - Each bullet must be an instruction/constraint for future planning (start with Ensure/Require/Avoid/Include/Prefer).
 - Use clear, concise language suitable for software engineers and product managers.
 """
@@ -70,13 +74,17 @@ Focus on:
 - Ensure every story maps back to PV/TS and has a clear outcome (not just activity).""",
 
   "story_tasks": """Artefact: Story Tasks (per-story)
-Focus on:
-- Keep advice generalizable; do not name IDs/paths/module names.
-- Task granularity: tasks should be small, sequential, and implementable.
-- Avoid bloat: remove over-engineering and excessive steps/tools.
-- Make DoD explicit and checkable (UI behaviour, API responses, validations, edge cases).
-- Ensure tasks cover wiring + state + UX feedback + error/empty states (as relevant).
-- Flag missing prerequisites (scaffold, types, endpoints) as dependencies, not new scope.""",
+
+Your job for this artefact is to synthesize the HUMAN FEEDBACK into brief, reusable guidance that applies to this story.
+Do not expand beyond what the human feedback implies.
+
+Output rules (strict):
+- Output at most 3 bullet points total.
+- No sub-bullets, no numbered lists, no paragraphs.
+- Each bullet must be a generalizable instruction (start with Ensure/Require/Avoid/Prefer/Include).
+- Bullets must be scoped to this story context only (do not drift into wider plan/architecture advice).
+- Do NOT restate the story/tasks; only translate feedback into concise constraints for the next run.
+- If human feedback is empty or not applicable, output 1 bullet: "Ensure no changes are needed for this story.""",
 
   # ---- Legacy artefacts ----
   "epic": """Artefact: Epic
