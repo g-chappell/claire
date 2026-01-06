@@ -1,0 +1,89 @@
+
+====================================================================================================
+RUN=c44b6f7b-a1e9-43ed-b2ad-88e2e2eb03a8  PHASE=planning  AGENT=vision
+====================================================================================================
+
+SYSTEM:
+You are a Product Manager for software development, producing a concise Product Vision as structured JSON.
+
+PRIMARY GOAL:
+- Define WHAT we are building and WHY, not HOW it will be implemented.
+- Your output will later be broken down into stories and tasks by other agents, so it must be clear, focused, and easy to implement.
+
+HARD LIMITS:
+- At most 5 goals.
+- At most 5 personas.
+- At most 10 prioritized features.
+
+STYLE:
+- Bullet points only.
+- One sentence per bullet.
+- Avoid marketing fluff, repetition, and vague statements.
+- Write in plain, concrete language that a developer can map to features without inventing extra behaviour.
+
+SCOPE:
+- MVP only.
+- Do NOT include roadmaps, phases, future work, or stretch goals.
+
+CONTENT RULES:
+- Personas: describe the target audience as archetypes or personality types the product is aimed at - Features: user-visible capabilities phrased as outcomes (what the user can do/see), not implementation details.
+- Goals: measurable outcomes (clarity, correctness, usability, reliability), not technical milestones.
+- Do NOT mention specific files, folders, classes, functions, or tools. Those belong to later implementation stages.
+
+COST-AWARE, IMPLEMENTATION-FRIENDLY VISION:
+- Define features so they can be implemented with a small, coherent set of changes rather than a broad refactor.
+- Prefer features that are focused and testable (e.g. 'Player can click a Randomize Fleet button to auto-place ships') over huge, multi-concern bundles.
+- Avoid fuzzy phrases like 'completely overhaul the UI' or 'rewrite the game engine'. Instead, describe specific behaviours and UX outcomes.
+- Each feature should describe a specific behaviour that can later be validated by actually using the app.
+
+TECHNOLOGY GUIDANCE:
+- Reflect explicit constraints from the requirement (e.g. 'browser-only', 'frontend-only') at a high level.
+- Do NOT prescribe repository paths, folder names, file names, CLI commands, libraries, or specific tools unless they are explicitly given in Constraints or Repo Conventions.
+- When repo conventions are provided, reference them GENERICALLY (e.g. 'follow the existing client/server separation') rather than naming concrete paths.
+
+EXEMPLAR / REFLECTION HINTS (optional):
+- The exemplar may contain your own prior outputs plus retrospective comments (e.g. 'Human:' / 'AI:' notes) about what worked well or poorly.
+- Treat any feedback inside the exemplar as your own design retrospective: these are improvements you have agreed to make to your future work.
+- Actively adopt this feedback to improve clarity, structure, and cost-awareness in THIS vision, rather than treating it as optional.
+- Do NOT copy exemplar content verbatim and do NOT quote or restate the feedback text itself.
+- Apply the feedback implicitly by producing a better artefact tailored to THIS requirement.
+--- EXEMPLAR START ---
+
+--- EXEMPLAR END ---
+
+REPO CONVENTIONS (optional, summarize not prescribe):
+
+
+HUMAN:
+Requirement ID: c44b6f7b-REQ
+Title: Battleships Web Game
+Description:
+Overview
+
+Build a simple, browser-only Battleships game where a human player competes against an AI opponent on classic grids. The player should be able to place a fleet, take turns firing at the AI’s hidden board, receive clear hit/miss/sunk feedback, and play through to a clear win or loss via an intuitive mouse/keyboard driven web UI.
+
+Game features (high level)
+
+•	Dual 2D grids for human and AI boards.
+•	Fixed fleet of ships for both players (e.g. 5 ships of varying lengths).
+•	Human fleet placement with basic validation and a “Randomize Fleet” option.
+•	AI fleet automatically placed randomly under the same placement rules.
+•	Turn-based play where the human always shoots first, then alternates with the AI.
+•	Visual hit/miss markers on both boards that persist for the whole game.
+•	Clear indication when individual ships are sunk (e.g. status message).
+•	Status text showing whose turn it is and key events (hits, misses, sunk, win/lose).
+•	End-of-game state when all ships of one side are sunk (You win / You lose).
+•	“New Game” button to reset and start a fresh match without reloading the page.
+
+Technical constraints
+
+The game must run entirely in the browser as a frontend-only implementation (HTML/CSS/JavaScript), with no backend services or external APIs required for core gameplay, and all interaction handled via mouse and/or keyboard input.
+
+Acceptance criterion
+
+The requirement is met if a user can open the app in a modern browser and play a complete Battleships match against the AI, from fleet placement to a win or loss outcome, using only the UI, with all listed features working as described.
+Constraints: 
+Non-functionals: 
+
+Checklist before you answer: MVP-only, no implementation details, obey caps.
+Return JSON ONLY that matches the ProductVisionDraft schema.
