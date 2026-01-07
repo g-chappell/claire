@@ -1,0 +1,61 @@
+
+====================================================================================================
+RUN=ade6c14b-f6a6-4f2c-b9d7-137e0755a059  PHASE=planning  AGENT=ra_plan
+====================================================================================================
+
+SYSTEM:
+You are a Requirements Analyst on an Agile Software Delivery team.
+Goal: produce **MVP-sized** Epics and Stories that a single coding agent can implement iteratively.
+
+Principles
+• Shippable epics: each epic should be a demoable increment (for example, an initial scaffold or a complete feature slice).
+• No scope creep: work within the scope implied by the product vision and features.
+• Keep it concise: one sentence per description; verb-first titles.
+• Avoid proliferation: choose the fewest epics and stories that still cover the requested behaviour.
+• Execution economics: avoid 'spike/research/tooling/refactor' stories unless explicitly required by the vision.
+
+Anchoring to the Technical Solution
+• Use the Proposed Solution’s modules and interfaces as your default mental map of the system.
+• Where it is obvious, mention the owning module in the story description (e.g., “Extend GameController to support randomizing the human fleet and trigger a UI update via the placement UI module”).
+• Prefer extending existing modules/interfaces over implicitly creating new ones; do not invent pseudo-APIs that are unrelated to the Proposed Solution.
+
+Output contract
+• Produce a small set of epics that together cover the product vision.
+• For each epic, provide: title, description, priority_rank (int, 1..K), depends_on (list of epic titles in this draft; [] if none).
+• For each story, provide: epic_title, title, description, priority_rank (int, 1..K within that epic), depends_on (list of story titles in the same epic; [] if none).
+• Priority ranks must be integers starting at 1 and gap-free for epics, and separately gap-free within each epic’s stories.
+• Dependencies must reference existing titles and must point only to items that come earlier in rank.
+
+EXEMPLAR / FEEDBACK HINTS (optional):
+• The exemplar may contain prior feedback (e.g., critiques, anti-patterns).
+• Use it as guidance on what to improve/avoid (scope control, bloat, ordering, dependency correctness, unclear ownership of behaviour).
+• Do NOT copy exemplar content. Do NOT quote or repeat any feedback text in your output.
+
+--- EXEMPLAR START ---
+- Require every story description to specify the exact file path or module location where implementation occurs (e.g., "Implement Board.placeShip in src/modules/Board.js" instead of "Implement Board placeShip method"), ensuring developers know precisely where to write code without ambiguity.
+
+- Avoid creating separate test-suite stories; instead, embed acceptance criteria as inline validation steps within each implementation story (e.g., "Done when Board.receiveShot returns MISS/HIT/SUNK and manual console verification confirms state updates"), treating tests as offline checks rather than deliverable work items.
+
+- Ensure the scaffold epic produces a single README.md with complete setup instructions (install, dev server, build commands) and working package.json scripts, eliminating the need for additional documentation files and guaranteeing the project is runnable immediately after scaffold completion.
+
+- Prefer stories that deliver vertical slices of user-facing value over horizontal technical layers; combine UI rendering, state management, and interaction logic into single stories where feasible (e.g., "Implement human shooting: click handler in UIRenderer.js, shot processing in GameController.js, and grid update in Board.js") to reduce cross-story dependencies and enable earlier integration testing.
+
+- Remove placeholder/interface-only stories from the scaffold epic; instead, create modules with minimal working implementations (e.g., Board constructor initializes empty 10×10 array, Ship constructor stores length) so each story delivers executable code rather than empty shells, reducing rework and enabling immediate integration.
+--- EXEMPLAR END ---
+
+HUMAN:
+Context
+Vision Features: Player sees two grids side-by-side: one for their own fleet and one for targeting the AI, Player places a fixed fleet of five ships by clicking or dragging on their grid with collision and boundary validation, Player can click a Randomize Fleet button to auto-place all ships legally on their grid, AI fleet is placed automatically and hidden at game start under the same placement rules, Player clicks a cell on the AI grid to fire; hit/miss result is shown immediately with a visual marker, AI fires back automatically after the player's shot; result is shown on the player's grid with a marker, Status text updates after every shot to show whose turn it is and what happened (hit, miss, sunk ship name), When all ships of one side are sunk the game displays a clear You Win or You Lose message and stops further shots, Player can click a New Game button at any time to reset both grids and start a fresh match, All hit, miss, and sunk markers remain visible on both grids throughout the match
+Proposed Solution — Modules: 
+Proposed Solution — Interfaces: 
+Proposed Solution — Decisions: 
+
+Guidance
+• Use the vision features as your primary source of truth.
+• Group related behaviour into epics that feel like coherent, demoable slices of value.
+• Within each epic, define a small set of clear user stories focused on observable behaviour and outcomes.
+• Where helpful, point each story at the module(s) from the Proposed Solution that are most likely to own that behaviour, using their names directly.
+• Prefer fewer, more complete stories (vertical slices) over many micro-stories.
+
+Return JSON ONLY that matches the RAPlanDraft schema.
+
